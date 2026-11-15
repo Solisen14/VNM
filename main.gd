@@ -1,6 +1,7 @@
 extends Control
 
 const Simulation = preload("res://simulation.gd")
+const Opening = preload("res://opening.gd")
 const MAP_SCRIPT = preload("res://system_map.gd")
 const CYAN := Color("#76e5ec")
 const GOLD := Color("#f5bd76")
@@ -8,9 +9,14 @@ const MUTED := Color("#9aafc4")
 const WHITE := Color("#edf6ff")
 
 var sim := Simulation.new()
+var opening := Opening.new()
+var intro_active := true
+var casualty_selection := -1
 var map: Control
 var stocks: Label
 var objective: Label
+var casualties_label: Label
+var intro_button: Button
 var insight_button: Button
 var factory_button: Button
 var relay_button: Button
@@ -70,6 +76,8 @@ func _ready() -> void:
 
 	side.add_child(label("DIRECTIVE", 13, CYAN))
 	objective = paragraph(side, "")
+	intro_button = button(side, "Skip intro", finish_intro)
+	casualties_label = paragraph(side, "", 13, MUTED)
 	insight_button = button(side, "Insight · Salvage the refinery", salvage)
 	factory_button = button(side, "Place factory  ·  %d metal" % Simulation.FACTORY_COST, begin_placement.bind("factory"))
 	relay_button = button(side, "Place relay  ·  %d metal" % Simulation.RELAY_COST, begin_placement.bind("relay"))
@@ -175,10 +183,15 @@ func button(parent: Control, title: String, action: Callable) -> Button:
 
 func _process(delta: float) -> void:
 	if not paused:
-		accumulator += minf(delta, 0.15) * speed
+		accumulator += minf(delta, 0.15) * (1 if intro_active else speed)
 		while accumulator >= 0.05:
 			accumulator -= 0.05
-			sim.tick(0.05)
+			opening.advance(0.05)
+			if intro_active:
+				if opening.time >= Opening.HANDOFF_AT:
+					finish_intro()
+			else:
+				sim.tick(0.05)
 	refresh()
 	map.queue_redraw()
 
@@ -190,7 +203,17 @@ func refresh() -> void:
 	stocks.text = "ORE IN BUFFER  %d      METAL AT WRECK  %d      DRONES  %d" % [
 		sim.ore_buffer, sim.metal, sim.drones.size()
 	]
-	if not sim.insight:
+	if intro_active:
+		if opening.time < Opening.RECALL_AT:
+			stocks.text = "FLEET ONLINE  %d" % Opening.FLEET_SIZE
+			objective.text = "Human mining vessel  ·  Ore transfer in progress."
+		elif opening.time < Opening.BLAST_AT:
+			stocks.text = "FLEET RECALL  %d" % Opening.FLEET_SIZE
+			objective.text = "Fleet recall in progress. All drones return to dock for departure."
+		else:
+			stocks.text = "SURVIVORS  5"
+			objective.text = "Reactor breach. Ship signal lost. Five mining drones remain operational."
+	elif not sim.insight:
 		objective.text = "The ship is gone. The five are still mining. Wait for their holds to fill."
 	elif not sim.refinery:
 		objective.text = "All holds full. Ship intake offline. The processing bay still responds."
@@ -204,10 +227,15 @@ func refresh() -> void:
 		objective.text = "A new generation is active. Place a relay near the eastern edge of your sensor range."
 	else:
 		objective.text = "Outer ore field charted. Take the relay offline to see how the map handles lost telemetry."
-	insight_button.visible = not sim.refinery
+	intro_button.visible = intro_active
+	casualties_label.visible = not opening.casualties.is_empty()
+	if casualties_label.visible:
+		casualties_label.text = "%d destroyed · %d drifting disabled" % [opening.destroyed, opening.disabled]
+	insight_button.visible = not intro_active and not sim.refinery
 	insight_button.disabled = not sim.insight
-	factory_button.visible = not sim.factory
+	factory_button.visible = not intro_active and not sim.factory
 	factory_button.disabled = not sim.refinery or sim.metal < Simulation.FACTORY_COST
+	relay_button.visible = not intro_active
 	relay_button.disabled = not sim.refinery or (not sim.relay and sim.metal < Simulation.RELAY_COST)
 	relay_button.text = "Move sensor relay" if sim.relay else "Place relay  ·  %d metal" % Simulation.RELAY_COST
 	toggle_relay_button.visible = sim.relay
@@ -239,6 +267,18 @@ func refresh() -> void:
 	refresh_detail()
 
 func refresh_detail() -> void:
+	if casualty_selection >= 0:
+		var contact := opening.casualties[casualty_selection]
+		if not sim.in_coverage(contact.position):
+			detail.text = "Contact lost · Outside sensor range"
+		elif contact.kind == "disabled":
+			detail.text = "Drone %03d · Disabled\nDrifting on residual momentum. Repair potential detected." % contact.id
+		else:
+			detail.text = "Drone %03d · Destroyed\nHull fragments contain reclaimable material." % contact.id
+		return
+	if intro_active:
+		detail.text = "Monitoring fleet traffic."
+		return
 	if selected < 0 or selected >= sim.drones.size():
 		detail.text = "Click a visible drone to see its inherited priorities and current order."
 		return
@@ -281,8 +321,29 @@ func toggle_pause() -> void:
 	paused = not paused
 	pause_button.text = "Resume" if paused else "Pause"
 
+func finish_intro() -> void:
+	if not intro_active:
+		return
+	if opening.casualties.is_empty():
+		opening.time = Opening.BLAST_AT
+		opening.resolve_blast()
+	opening.advance(maxf(0.0, Opening.HANDOFF_AT - opening.time))
+	for i in range(sim.drones.size()):
+		var drone := sim.drones[i]
+		drone.position = opening.survivors[i]
+		drone.id = opening.survivor_ids[i]
+		sim.set_order(drone, "Mine", Simulation.INNER, "Original mining directive")
+	sim.next_drone_id = Opening.FLEET_SIZE + 1
+	intro_active = false
+	map.recenter()
+
 func restart() -> void:
 	sim = Simulation.new()
+	opening = Opening.new()
+	intro_active = true
+	casualty_selection = -1
+	paused = false
+	pause_button.text = "Pause"
 	selected = -1
 	placement = ""
 	accumulator = 0.0

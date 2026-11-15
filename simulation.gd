@@ -34,6 +34,7 @@ class Drone:
 		weights = priorities
 
 var drones: Array[Drone] = []
+var next_drone_id := 6
 var refinery := false
 var insight := false
 var factory := false
@@ -138,7 +139,8 @@ func update_factory(delta: float) -> void:
 		return
 	factory_metal -= DRONE_COST
 	fabrication_time = 0.0
-	var new_drone := Drone.new(drones.size() + 1, factory_position, generation, latest_weights)
+	var new_drone := Drone.new(next_drone_id, factory_position, generation, latest_weights)
+	next_drone_id += 1
 	drones.append(new_drone)
 	choose_order(new_drone)
 
