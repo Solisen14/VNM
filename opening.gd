@@ -12,6 +12,8 @@ class Contact:
 	var velocity: Vector2
 	var kind: String
 	var angle: float
+	var removed := false
+	var claimed := false
 
 	func _init(number: int, origin: Vector2, drift: Vector2, state: String, heading: float) -> void:
 		id = number
@@ -46,6 +48,8 @@ func advance(delta: float) -> void:
 		resolve_blast()
 	var drift_delta := minf(delta, maxf(0, time - BLAST_AT))
 	for contact in casualties:
+		if contact.removed:
+			continue
 		contact.position += contact.velocity * drift_delta
 		contact.angle += (0.12 if contact.kind == "disabled" else 0.48) * drift_delta
 

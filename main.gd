@@ -18,6 +18,14 @@ var objective: Label
 var casualties_label: Label
 var intro_button: Button
 var insight_button: Button
+var fabricator_button: Button
+var inventory: Label
+var field_option: OptionButton
+var founder_panel: VBoxContainer
+var founder_choice: OptionButton
+var founder_sliders: Array[HSlider] = []
+var founder_values: Array[Label] = []
+var template_panel: VBoxContainer
 var factory_button: Button
 var relay_button: Button
 var toggle_relay_button: Button
@@ -66,7 +74,7 @@ func _ready() -> void:
 	body.add_child(map)
 
 	var side := VBoxContainer.new()
-	side.custom_minimum_size.x = 292
+	side.custom_minimum_size.x = 330
 	side.add_theme_constant_override("separation", 7)
 	var scroller := ScrollContainer.new()
 	scroller.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -78,33 +86,42 @@ func _ready() -> void:
 	objective = paragraph(side, "")
 	intro_button = button(side, "Skip intro", finish_intro)
 	casualties_label = paragraph(side, "", 13, MUTED)
-	insight_button = button(side, "Insight · Salvage the refinery", salvage)
-	factory_button = button(side, "Place factory  ·  %d metal" % Simulation.FACTORY_COST, begin_placement.bind("factory"))
-	relay_button = button(side, "Place relay  ·  %d metal" % Simulation.RELAY_COST, begin_placement.bind("relay"))
+	insight_button = button(side, "Insight · Coordinate the Five", salvage)
+	fabricator_button = button(side, "Restore maintenance fabricator", restore_fabricator)
+	factory_button = button(side, "Place factory · 3 frames + 2 modules", begin_placement.bind("factory"))
+	relay_button = button(side, "Place relay · 1 frame", begin_placement.bind("relay"))
 	toggle_relay_button = button(side, "Take relay offline", toggle_relay)
 	placement_status = paragraph(side, "", 13, GOLD)
+	inventory = paragraph(side, "", 14)
+	field_option = OptionButton.new()
+	field_option.add_item("Mining target · nearest")
+	field_option.add_item("Mining target · inner field")
+	field_option.add_item("Mining target · outer field")
+	field_option.item_selected.connect(func(index: int) -> void: sim.mine_field = index - 1)
+	side.add_child(field_option)
 
-	side.add_child(HSeparator.new())
-	side.add_child(label("ORDERS FOR NEW DRONES", 13, CYAN))
-	generation_label = paragraph(side, "", 13, MUTED)
-	for action in ["Mine", "Deliver", "Repair"]:
-		var row := HBoxContainer.new()
-		side.add_child(row)
-		var action_label := label(action, 14, WHITE)
-		action_label.custom_minimum_size.x = 57
-		row.add_child(action_label)
-		var slider := HSlider.new()
-		slider.max_value = 100
-		slider.step = 1
-		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(slider)
-		sliders.append(slider)
-		var value := label("", 14, GOLD)
-		value.custom_minimum_size.x = 29
-		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		row.add_child(value)
-		slider_labels.append(value)
-	apply_button = button(side, "Apply template", apply_template)
+	founder_panel = VBoxContainer.new()
+	side.add_child(founder_panel)
+	founder_panel.add_child(HSeparator.new())
+	founder_panel.add_child(label("THE FOUNDERS", 13, CYAN))
+	founder_choice = OptionButton.new()
+	for i in range(5):
+		founder_choice.add_item("Founder %d" % (i + 1))
+	founder_choice.item_selected.connect(load_founder)
+	founder_panel.add_child(founder_choice)
+	for action in ["Mine", "Haul", "Service", "Salvage", "Restore"]:
+		add_priority(founder_panel, action, founder_sliders, founder_values)
+	for slider in founder_sliders:
+		slider.value_changed.connect(update_founder)
+
+	template_panel = VBoxContainer.new()
+	side.add_child(template_panel)
+	template_panel.add_child(HSeparator.new())
+	template_panel.add_child(label("ORDERS FOR NEW DRONES", 13, CYAN))
+	generation_label = paragraph(template_panel, "", 13, MUTED)
+	for action in ["Mine", "Haul", "Service"]:
+		add_priority(template_panel, action, sliders, slider_labels)
+	apply_button = button(template_panel, "Apply template", apply_template)
 
 	side.add_child(HSeparator.new())
 	side.add_child(label("DRONE TELEMETRY", 13, CYAN))
@@ -120,7 +137,43 @@ func _ready() -> void:
 	footer.add_child(zoom_label)
 	button(footer, "Recenter", map.recenter)
 	reset_sliders()
+	load_founder(0)
 	refresh()
+
+func add_priority(parent: VBoxContainer, action: String, controls: Array[HSlider], readings: Array[Label]) -> void:
+	var row := HBoxContainer.new()
+	parent.add_child(row)
+	var heading := label(action, 14, WHITE)
+	heading.custom_minimum_size.x = 60
+	row.add_child(heading)
+	var slider := HSlider.new()
+	slider.max_value = 100
+	slider.step = 1
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(slider)
+	controls.append(slider)
+	var reading := label("", 14, GOLD)
+	reading.custom_minimum_size.x = 29
+	reading.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(reading)
+	readings.append(reading)
+
+func load_founder(index: int) -> void:
+	var drone := sim.drones[index]
+	var values := [drone.weights.x, drone.weights.y, drone.weights.z, drone.salvage_priority, drone.restore_priority]
+	for i in range(founder_sliders.size()):
+		founder_sliders[i].set_value_no_signal(values[i])
+		founder_values[i].text = str(values[i])
+
+func update_founder(_value: float) -> void:
+	if not sim.refinery:
+		return
+	var drone := sim.drones[founder_choice.selected]
+	drone.weights = Vector3i(int(founder_sliders[0].value), int(founder_sliders[1].value), int(founder_sliders[2].value))
+	drone.salvage_priority = int(founder_sliders[3].value)
+	drone.restore_priority = int(founder_sliders[4].value)
+	for i in range(founder_sliders.size()):
+		founder_values[i].text = str(int(founder_sliders[i].value))
 
 func section(child: Control, fill: Color, padding: int) -> PanelContainer:
 	var panel := PanelContainer.new()
@@ -200,9 +253,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		placement = ""
 
 func refresh() -> void:
-	stocks.text = "ORE IN BUFFER  %d      METAL AT WRECK  %d      DRONES  %d" % [
-		sim.ore_buffer, sim.metal, sim.drones.size()
-	]
+	stocks.text = "ORE IN BUFFER  %d      ACTIVE DRONES  %d" % [sim.ore_buffer[0] + sim.ore_buffer[1], sim.drones.size()]
 	if intro_active:
 		if opening.time < Opening.RECALL_AT:
 			stocks.text = "FLEET ONLINE  %d" % Opening.FLEET_SIZE
@@ -216,30 +267,41 @@ func refresh() -> void:
 	elif not sim.insight:
 		objective.text = "The ship is gone. The five are still mining. Wait for their holds to fill."
 	elif not sim.refinery:
-		objective.text = "All holds full. Ship intake offline. The processing bay still responds."
+		objective.text = "All holds full. Coordinate the Five and bring the ship’s refinery online."
+	elif not sim.fabricator:
+		objective.text = "Raise a founder’s Salvage priority to recover intact parts. Spend one control module to restore the wreck’s fabricator."
 	elif not sim.factory:
-		objective.text = "The refinery is running. Refine enough metal to place a drone factory."
+		objective.text = "Build a factory with 3 frames and 2 control modules. Founders with Restore priority can spend stored modules to revive old miners."
 	elif sim.generation == 1:
-		objective.text = "Set priorities and apply a template. The factory will keep making drones as metal arrives."
-	elif sim.drones.size() == 5:
-		objective.text = "The five are supplying the factory for its first build."
+		objective.text = "Apply a template under Orders for New Drones. Haulers will deliver components for continuous assembly."
 	elif not sim.outer_seen:
-		objective.text = "A new generation is active. Place a relay near the eastern edge of your sensor range."
+		objective.text = "Place a relay near the right edge of sensor range to discover ore richer in copper and silicon."
 	else:
-		objective.text = "Outer ore field charted. Take the relay offline to see how the map handles lost telemetry."
+		objective.text = "Choose an ore field to supply the components your factory needs."
 	intro_button.visible = intro_active
-	casualties_label.visible = not opening.casualties.is_empty()
-	if casualties_label.visible:
-		casualties_label.text = "%d destroyed · %d drifting disabled" % [opening.destroyed, opening.disabled]
+	casualties_label.visible = intro_active and not opening.casualties.is_empty()
+	if intro_active and casualties_label.visible:
+		casualties_label.text = "%d destroyed in blast · %d disabled" % [opening.destroyed, opening.disabled]
 	insight_button.visible = not intro_active and not sim.refinery
 	insight_button.disabled = not sim.insight
 	factory_button.visible = not intro_active and not sim.factory
-	factory_button.disabled = not sim.refinery or sim.metal < Simulation.FACTORY_COST
-	relay_button.visible = not intro_active
-	relay_button.disabled = not sim.refinery or (not sim.relay and sim.metal < Simulation.RELAY_COST)
-	relay_button.text = "Move sensor relay" if sim.relay else "Place relay  ·  %d metal" % Simulation.RELAY_COST
+	factory_button.disabled = not sim.can_build_factory()
+	fabricator_button.visible = sim.refinery and not sim.fabricator
+	fabricator_button.disabled = sim.modules == 0
+	fabricator_button.text = "Restore fabricator · 1 control module"
+	relay_button.visible = sim.refinery
+	relay_button.disabled = not sim.relay and sim.frames < Simulation.RELAY_COST
+	relay_button.text = "Move sensor relay" if sim.relay else "Place relay · 1 frame"
 	toggle_relay_button.visible = sim.relay
 	toggle_relay_button.text = "Take relay offline" if sim.relay_online else "Bring relay online"
+	founder_panel.visible = sim.refinery
+	template_panel.visible = sim.factory
+	inventory.visible = sim.refinery
+	inventory.text = "WRECK STORAGE\nIron %d  ·  Carbon %d\nCopper %d  ·  Silicon %d\nFrames %d  ·  Control modules %d" % [
+		sim.elements.x, sim.elements.y, sim.elements.z, sim.elements.w, sim.frames, sim.modules
+	]
+	field_option.visible = sim.outer_seen
+	field_option.set_item_disabled(2, not sim.in_coverage(Simulation.OUTER))
 	var draft := priorities()
 	var has_template := sim.generation > 1
 	var has_changes := not has_template or draft != sim.latest_weights
@@ -255,8 +317,8 @@ func refresh() -> void:
 		]
 		if has_changes:
 			template_status += " · Draft Gen %d" % (sim.generation + 1)
-	generation_label.text = "%s\nFactory metal  %d  ·  %d per drone\n%s" % [
-		template_status, sim.factory_metal, Simulation.DRONE_COST, sim.factory_status()
+	generation_label.text = "%s\nFactory stock · %d frames / %d modules\n%s" % [
+		template_status, sim.factory_frames, sim.factory_modules, sim.factory_status()
 	]
 	if not placement.is_empty():
 		var problem := sim.place_error(placement, map.world_point(map.get_local_mouse_position()))
@@ -269,12 +331,14 @@ func refresh() -> void:
 func refresh_detail() -> void:
 	if casualty_selection >= 0:
 		var contact := opening.casualties[casualty_selection]
-		if not sim.in_coverage(contact.position):
+		if contact.removed:
+			detail.text = "Recovered contact · Drone %03d" % contact.id
+		elif not sim.in_coverage(contact.position):
 			detail.text = "Contact lost · Outside sensor range"
 		elif contact.kind == "disabled":
-			detail.text = "Drone %03d · Disabled\nDrifting on residual momentum. Repair potential detected." % contact.id
+			detail.text = "Drone %03d · Disabled\nA founder can restore this drone with 1 control module." % contact.id
 		else:
-			detail.text = "Drone %03d · Destroyed\nHull fragments contain reclaimable material." % contact.id
+			detail.text = "Drone %03d · Destroyed\nSalvage yield: %s." % [contact.id, "frame" if contact.id % 2 == 0 else "control module"]
 		return
 	if intro_active:
 		detail.text = "Monitoring fleet traffic."
@@ -286,9 +350,14 @@ func refresh_detail() -> void:
 	if not sim.in_coverage(drone.position):
 		detail.text = "Drone %02d · Signal lost\nCurrent telemetry unavailable." % drone.id
 		return
-	detail.text = "Drone %02d · Gen %d · %s\nOre %d/%d  ·  Metal %d  ·  Wear %d%%\nMine %d  /  Deliver %d  /  Repair %d\n%s" % [
-		drone.id, drone.generation, drone.order, drone.ore, Simulation.CAPACITY,
-		drone.cargo_metal, roundi(100.0 - drone.condition),
+	var lineage := "Gen %d" % drone.generation
+	if drone.founder > 0:
+		lineage = "Founder %d" % drone.founder
+	elif drone.restored:
+		lineage = "Restored · Original orders"
+	detail.text = "Drone %03d · %s\n%s · Wear %d%%\nOre %d/%d · Frames %d · Modules %d\nMine %d / Haul %d / Service %d\n%s" % [
+		drone.id, lineage, drone.order, roundi(100.0 - drone.condition),
+		drone.ore, Simulation.CAPACITY, drone.frames, drone.modules,
 		drone.weights.x, drone.weights.y, drone.weights.z, drone.reason
 	]
 
@@ -302,6 +371,11 @@ func reset_sliders() -> void:
 func salvage() -> void:
 	if sim.insight:
 		sim.refinery = true
+
+func restore_fabricator() -> void:
+	if sim.refinery and not sim.fabricator and sim.modules > 0:
+		sim.modules -= 1
+		sim.fabricator = true
 
 func begin_placement(kind: String) -> void:
 	placement = kind if placement != kind else ""
@@ -333,6 +407,7 @@ func finish_intro() -> void:
 		drone.position = opening.survivors[i]
 		drone.id = opening.survivor_ids[i]
 		sim.set_order(drone, "Mine", Simulation.INNER, "Original mining directive")
+	sim.contacts = opening.casualties
 	sim.next_drone_id = Opening.FLEET_SIZE + 1
 	intro_active = false
 	map.recenter()
@@ -348,4 +423,7 @@ func restart() -> void:
 	placement = ""
 	accumulator = 0.0
 	reset_sliders()
+	founder_choice.select(0)
+	load_founder(0)
+	field_option.select(0)
 	map.recenter()

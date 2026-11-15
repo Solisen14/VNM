@@ -1,34 +1,28 @@
 # The First Five
 
-A short, single-system Godot 4 prototype about five surviving autonomous mining drones.
+A single-system Godot 4 prototype about five surviving autonomous mining drones.
 
 ## Run
 
-1. On GitHub, choose **Code → Download ZIP**, then extract it.
-2. Open the standard Godot 4 editor. In Project Manager, click **Import** and select `project.godot` inside the extracted folder.
-3. Press **F5** to run the main scene.
+1. On GitHub, choose **Code → Download ZIP** and extract the project.
+2. Open Godot 4. In Project Manager, click **Import** and select `project.godot`.
+3. Press **F5** to play.
 
-## Opening
+## From wreck to factory
 
-Watch 256 autonomous drones haul ore to the human mining ship. The ship initiates a recall before departure, then its reactor explodes. Five survivors pick up their mining orders from their positions at the blast. **Skip intro** goes directly to the aftermath, and **Restart** replays the opening.
+1. Watch the fleet recall and blast, or choose **Skip intro**. The five survivors resume their original mining orders.
+2. When their holds fill, select **Insight · Coordinate the Five**. This brings the refinery online and unlocks separate priorities for each founder.
+3. Select a founder and raise **Salvage** to 100. They recover frames or control modules from amber debris and carry them to the wreck. Spend one control module to restore the maintenance fabricator.
+4. The refinery separates ore into iron, carbon, copper, and silicon according to the field’s composition. The fabricator makes frames from 3 iron and 1 carbon, and control modules from 2 copper and 2 silicon. The wreck holds the element and component inventories.
+5. With **Restore** enabled, a founder can collect a control module and carry it to a disabled violet drone. The restored miner follows its original orders. Lower **Restore** if you want to reserve modules for construction.
+6. Spend **3 frames and 2 control modules** to place the drone factory. Apply a template once. Haulers stock the factory’s internal inventory, and it assembles drones continuously using one frame and one module each. Apply different priorities to start a new generation.
 
-Amber fragments are destroyed drones with salvage potential. Violet drone hulls are disabled units that slowly drift and may be repairable. Click either to inspect it. The game tracks both types as individual contacts. Recovering materials and reactivating disabled drones are future mechanics.
+Founders are individually programmable. A mine-only founder caches ore at the field so a haul-only founder can collect it. Fabricated drones inherit the active template. Use **Service** for routine wear and **Restore** for disabled miners.
 
-## Play
+## Map and controls
 
-- Drag the map to pan. Scroll to zoom toward the cursor. Click a drone to inspect its current order, cargo, wear and inherited priorities.
-- When all five holds fill, claim the Insight to salvage the refinery. Ore is processed at the wreck.
-- Place a drone factory when you have 10 metal. Adjust the priorities and click **Apply template**. Drones carry refined metal from the wreck, and the factory keeps building drones while it has enough metal. Each new drone costs 6 metal.
-- Place a sensor relay near the right edge of the wreck’s coverage circle to discover the outer ore field. You can move the relay. Take it offline to see the last known location with no current ore count.
-- Use **1×** to cycle simulation speed, **Pause** to stop time, or **Restart** to replay the opening.
+- Drag to pan, scroll to zoom, and click drones or wreckage to inspect them.
+- Spend one frame on a relay near the right edge of the cyan sensor circle. The outer field is richer in copper and silicon. Choose a mining preference once it is charted.
+- Use **1×** to cycle speed, **Pause** to stop time, or **Restart** to replay the opening.
 
-The sliders are relative decision weights. New drones inherit the current values when fabricated. Applying a different template starts a new generation. The sidebar shows the active priorities while you edit the next template. Cargo and wear affect choices, and a full hold or critical wear can trigger an order directly.
-
-## Files
-
-- `opening.gd` handles fleet traffic, recall, the blast and the persistent aftermath.
-- `simulation.gd` handles drone decisions, ore, fabrication and sensor coverage.
-- `system_map.gd` handles map drawing, zoom, pan and selection.
-- `main.gd` handles player controls and telemetry.
-
-This playtest stops at one system. The relay demonstrates stale telemetry. Behaviour drift and probe launches are future mechanics.
+`opening.gd` runs the fleet recall and blast. `simulation.gd` runs drone decisions and production. `system_map.gd` draws the map. `main.gd` handles the interface.

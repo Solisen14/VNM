@@ -76,7 +76,7 @@ func map_click(point: Vector2) -> void:
 	var contact_distance := 9.0
 	for i in range(game.opening.casualties.size()):
 		var contact: Opening.Contact = game.opening.casualties[i]
-		if game.sim.in_coverage(contact.position):
+		if not contact.removed and game.sim.in_coverage(contact.position):
 			var distance := point.distance_to(screen_point(contact.position))
 			if distance < contact_distance and distance < nearest:
 				contact_distance = distance
@@ -189,7 +189,7 @@ func draw_blast(point: Vector2, age: float) -> void:
 func draw_casualties(show_all: bool) -> void:
 	for i in range(game.opening.casualties.size()):
 		var contact: Opening.Contact = game.opening.casualties[i]
-		if not show_all and not game.sim.in_coverage(contact.position):
+		if contact.removed or (not show_all and not game.sim.in_coverage(contact.position)):
 			continue
 		var point := screen_point(contact.position)
 		var direction := Vector2.from_angle(contact.angle)
@@ -257,6 +257,14 @@ func draw_field(location: Vector2, title: String, number: int, live: bool) -> vo
 		draw_polyline(rock, tint, 1.0, true)
 	write(point + Vector2(-46, -51 * zoom - 5), title, 13, tint)
 	var status := "%d ore" % game.sim.ore_remaining[number] if live else "Last known position · signal lost"
+	if live and not game.intro_active:
+		if game.sim.ore_cache[number] > 0:
+			status += " · %d cached" % game.sim.ore_cache[number]
+		if zoom >= 0.7:
+			var composition: Vector4i = Simulation.YIELDS[number]
+			write(point + Vector2(-46, -51 * zoom + 29), "Fe %d%% · C %d%% · Cu %d%% · Si %d%%" % [
+				composition.x, composition.y, composition.z, composition.w
+			], 11, DIM)
 	write(point + Vector2(-46, -51 * zoom + 13), status, 12, tint)
 
 func draw_structure(location: Vector2, title: String, tint: Color, triangular: bool) -> void:
@@ -273,7 +281,7 @@ func draw_structure(location: Vector2, title: String, tint: Color, triangular: b
 
 func draw_drone(drone: Simulation.Drone, selected: bool) -> void:
 	var point := screen_point(drone.position)
-	var tint: Color = PALETTE[(drone.generation - 1) % PALETTE.size()]
+	var tint: Color = Color("#bba6d7") if drone.restored else PALETTE[(drone.generation - 1) % PALETTE.size()]
 	var angle: float = drone.position.angle_to_point(drone.target)
 	var front := Vector2.from_angle(angle)
 	var side := front.orthogonal()
@@ -283,7 +291,8 @@ func draw_drone(drone: Simulation.Drone, selected: bool) -> void:
 		draw_arc(point, 11.0, 0, TAU, 32, tint, 1.4, true)
 		draw_dashed_line(point, screen_point(drone.target), tint.darkened(0.48), 1.0, 5.0)
 	if zoom >= 1.35 or selected:
-		write(point + Vector2(11, -7), "%02d / G%d" % [drone.id, drone.generation], 12, tint)
+		var caption := "Founder %d" % drone.founder if drone.founder > 0 else "%03d / G%d" % [drone.id, drone.generation]
+		write(point + Vector2(11, -7), caption, 12, tint)
 	if zoom >= 1.35:
 		draw_line(point + Vector2(-5, 9), point + Vector2(6, 9), tint.darkened(0.65), 2.0)
 		draw_line(point + Vector2(-5, 9), point + Vector2(-5 + 11.0 * drone.ore / Simulation.CAPACITY, 9), tint, 2.0)
