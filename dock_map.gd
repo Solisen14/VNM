@@ -18,12 +18,25 @@ var intact_hull: Texture2D
 
 func _ready() -> void:
 	clip_contents = true
-	var path := "res://assets/mothership.webp"
-	if ResourceLoader.exists(path):
-		hull = load(path)
-	var intact_path := "res://assets/mothership-intact.webp"
-	if ResourceLoader.exists(intact_path):
-		intact_hull = load(intact_path)
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	hull = load_ship_art("res://assets/mothership.webp")
+	intact_hull = load_ship_art("res://assets/mothership-intact.webp")
+
+func load_ship_art(path: String) -> Texture2D:
+	# A source checkout has the image even before Godot creates its import cache.
+	# Exported builds use the imported texture when the original file is absent.
+	if FileAccess.file_exists(path):
+		var pixels := Image.new()
+		var error := pixels.load_webp_from_buffer(FileAccess.get_file_as_bytes(path))
+		if error == OK:
+			pixels.generate_mipmaps()
+			return ImageTexture.create_from_image(pixels)
+	elif ResourceLoader.exists(path, "Texture2D"):
+		var imported := ResourceLoader.load(path, "Texture2D") as Texture2D
+		if imported != null:
+			return imported
+	push_error("Dock 03 could not load mothership artwork at %s" % path)
+	return null
 
 func reset_view() -> void:
 	camera = Vector2(155, 155)
@@ -77,10 +90,15 @@ func select_at(point: Vector2) -> void:
 		if not is_visible_contact(contact):
 			continue
 		var marker := screen_point(game.state.target_position(contact))
-		var candidate := minf(point.distance_to(marker), point.distance_to(marker + Vector2(34, -22)))
+		var candidate := minf(point.distance_to(marker), point.distance_to(marker + contact_caption_offset(contact) + Vector2(20, -9)))
 		if candidate < distance:
 			game.selected = contact
 			distance = candidate
+
+func contact_caption_offset(contact: String) -> Vector2:
+	if contact == "depot":
+		return Vector2(13, 23)
+	return Vector2(14, -10)
 
 func is_visible_contact(contact: String) -> bool:
 	return contact != "cache" or game.state.phase >= Mission.Phase.ROUTE_SOURCE
@@ -106,7 +124,7 @@ func _draw() -> void:
 	if plate:
 		draw_texture_rect(plate, Rect2(screen_point(ART_RECT.position), ART_RECT.size * zoom), false)
 	else:
-		draw_structural_deck()
+		write(Vector2(22, size.y - 24), "MOTHERSHIP ART UNAVAILABLE · CHECK PROJECT ASSETS", AMBER)
 	if game.cinematic:
 		draw_opening()
 		return
@@ -135,7 +153,7 @@ func _draw() -> void:
 		var relevant: bool = game.state.next_contact() == contact
 		var tint := AMBER if (contact == "worker" and not powered) or relevant else Color("#b4c6c8")
 		reticle(point, tint if active or relevant else Color(tint, 0.60), 16.0 if active else 10.0)
-		write(point + Vector2(14, -10), contact_label(contact).to_upper(), tint)
+		write(point + contact_caption_offset(contact), contact_label(contact).to_upper(), tint)
 
 func draw_opening() -> void:
 	var elapsed: float = game.time
@@ -172,17 +190,6 @@ func draw_opening() -> void:
 				write(Vector2(24, 116 + 20 * i), "%s   /   PEER ONLINE" % game.state.shipmates[i].to_upper(), CYAN, 14)
 		if boot_age > 1.1:
 			draw_craft(game.state.player, 0.30, CYAN, true, 1.0)
-
-func draw_structural_deck() -> void:
-	var base := screen_point(Vector2(-1080, -355))
-	draw_rect(Rect2(base, Vector2(1920, 580) * zoom), Color("#323b3c"))
-	for i in range(15):
-		var point := screen_point(Vector2(-1040 + i * 117, -295))
-		draw_rect(Rect2(point, Vector2(95, 490) * zoom), Color("#3b4442"))
-		draw_rect(Rect2(point + Vector2(0, 135) * zoom, Vector2(95, 11) * zoom), Color("#171f21"))
-		draw_line(point, point + Vector2(0, 476) * zoom, Color("#162022"), 3)
-		if i % 2 == 0:
-			draw_circle(point + Vector2(85, 438) * zoom, 5.0 * zoom, AMBER, true, -1, true)
 
 func draw_craft(location: Vector2, heading: float, tint: Color, lights: bool, scale_factor: float) -> void:
 	var center := screen_point(location)
