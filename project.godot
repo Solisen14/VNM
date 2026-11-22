@@ -1,8 +1,8 @@
 config_version=5
 
 [application]
-config/name="The First Five"
-run/main_scene="res://main.tscn"
+config/name="VNM"
+run/main_scene="res://dock_03.tscn"
 config/features=PackedStringArray("4.0", "GL Compatibility")
 
 [display]

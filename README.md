@@ -1,6 +1,6 @@
-# The First Five
+# VNM
 
-A single-system Godot 4 prototype about five surviving autonomous mining drones.
+A Godot 4 prototype about five surviving control drones. The project opens at Dock 03.
 
 ## Run
 
@@ -8,7 +8,17 @@ A single-system Godot 4 prototype about five surviving autonomous mining drones.
 2. Open Godot 4. In Project Manager, click **Import** and select `project.godot`.
 3. Press **F5** to play.
 
-## From wreck to factory
+## Dock 03
+
+After the fleet recall, watch the local network reboot or choose **Skip opening**. Move with **WASD** or right-click a point on the map. Left-click a contact, fly within reach, and use the action in the sidebar. Middle-drag pans and the mouse wheel zooms. **Follow drone** recenters the camera.
+
+Inspect Worker 031, recover a repair kit from the service locker, and take it to the wreck stockpile. The control module stays reserved until you authorize its use. Bring it back to Worker 031 and fit it. Then select the scrap cache as its pickup and the wreck stockpile as its drop-off. The worker keeps hauling on its own while you explore. The sidebar shows your cargo, stock on hand, and cargo in transit separately.
+
+## Earlier factory prototype
+
+Open `main.tscn` and press **F6** to run the earlier single-system sandbox and its original mining-drone opening.
+
+### From wreck to factory
 
 1. Watch the fleet recall and blast, or choose **Skip intro**. The five survivors resume their original mining orders.
 2. When their holds fill, select **Insight · Coordinate the Five**. This brings the refinery online and unlocks separate priorities for each founder.
