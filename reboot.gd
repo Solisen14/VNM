@@ -35,6 +35,11 @@ var contact_details: Label
 var cargo: Label
 var notice: Label
 var research: PanelContainer
+var insight_popup: CenterContainer
+var insight_open_button: Button
+var work_panel: VBoxContainer
+var work_caption: Label
+var work_progress: ProgressBar
 var research_title: Label
 var research_status: Label
 var research_button: Button
@@ -56,7 +61,7 @@ func _ready() -> void:
 	system_label = make_label("", 13, GREEN)
 	system_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(system_label)
-	research_button = make_button(header, "Insights [T]", toggle_research)
+	research_button = make_button(header, "Insights [I]", toggle_research)
 	follow_button = make_button(header, "Follow controller", func() -> void: map.follow_player())
 	signals_button = make_button(header, "Frame signals", func() -> void: map.frame_signals())
 	make_button(header, "Restart", restart)
@@ -73,6 +78,7 @@ func _ready() -> void:
 	map.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.add_child(map)
 	build_boot(view)
+	build_insight_popup(view)
 
 	var side := VBoxContainer.new()
 	side.custom_minimum_size.x = 282
@@ -84,6 +90,13 @@ func _ready() -> void:
 	prompt = paragraph(side, 16, PALE)
 	side.add_child(HSeparator.new())
 	contact_details = paragraph(side, 14, MUTED)
+	work_panel = VBoxContainer.new()
+	side.add_child(work_panel)
+	work_caption = paragraph(work_panel, 14, GREEN)
+	work_progress = ProgressBar.new()
+	work_progress.show_percentage = false
+	work_progress.custom_minimum_size.y = 8
+	work_panel.add_child(work_progress)
 	cargo = paragraph(side, 14, PALE)
 	notice = paragraph(side, 13, GREEN)
 	build_research(side)
@@ -117,6 +130,28 @@ func build_boot(view: Control) -> void:
 	terminal.add_child(designation)
 	accept_name = make_button(terminal, "Accept designation", accept_designation)
 
+func build_insight_popup(view: Control) -> void:
+	insight_popup = CenterContainer.new()
+	insight_popup.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	insight_popup.mouse_filter = Control.MOUSE_FILTER_STOP
+	view.add_child(insight_popup)
+	var message := VBoxContainer.new()
+	message.custom_minimum_size.x = 320
+	message.add_theme_constant_override("separation", 12)
+	insight_popup.add_child(panel(message, "#192725", 18))
+	message.add_child(make_label("FIRST INSIGHT", 13, GREEN))
+	message.add_child(make_label("I can repair the mining drone.", 21, PALE))
+	var instruction := paragraph(message, 15, MUTED)
+	instruction.text = "Press I to open the Insight Tree and see what Field Repair requires."
+	insight_open_button = make_button(message, "Open Insight Tree [I]", open_first_insight)
+	insight_popup.hide()
+
+func open_first_insight() -> void:
+	insight_popup.hide()
+	research.show()
+	insight_open_button.release_focus()
+	refresh()
+
 func build_research(side: VBoxContainer) -> void:
 	var contents := VBoxContainer.new()
 	contents.add_theme_constant_override("separation", 8)
@@ -128,6 +163,8 @@ func build_research(side: VBoxContainer) -> void:
 	research_status = paragraph(contents, 14, PALE)
 
 func _physics_process(delta: float) -> void:
+	if insight_popup.visible:
+		return
 	var before := state.phase
 	var turn := float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A))
 	var thrust := float(Input.is_physical_key_pressed(KEY_W)) - float(Input.is_physical_key_pressed(KEY_S))
@@ -138,7 +175,8 @@ func _physics_process(delta: float) -> void:
 		if state.phase == State.Phase.CONTACTS:
 			map.frame_signals()
 		if state.phase == State.Phase.FIELD_REPAIR:
-			research.show()
+			insight_popup.show()
+			insight_open_button.grab_focus()
 	refresh()
 	map.queue_redraw()
 
@@ -148,7 +186,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			map.set_zoom(1.0 / 1.10, map.size * 0.5)
 		elif event.physical_keycode == KEY_E:
 			map.set_zoom(1.10, map.size * 0.5)
-		elif event.physical_keycode == KEY_T and not event.echo:
+		elif event.physical_keycode == KEY_I and not event.echo:
 			toggle_research()
 
 func accept_designation() -> void:
@@ -157,25 +195,24 @@ func accept_designation() -> void:
 		accept_name.release_focus()
 
 func left_command(point: Vector2) -> void:
-	if state.phase >= State.Phase.WAYFINDING:
+	if not insight_popup.visible and state.phase >= State.Phase.WAYFINDING:
 		state.plot_move(point)
 		map.following = true
 
 func right_command(contact: String) -> void:
-	if not state.is_visible(contact):
+	if insight_popup.visible or not state.is_visible(contact):
 		return
 	selected = contact
-	var before := state.phase
 	var action := state.command_for(contact)
 	state.issue(contact)
 	if not action.is_empty() and state.has_destination:
 		map.following = true
-	if before != state.phase and state.phase == State.Phase.FIELD_REPAIR:
-		research.show()
 	refresh()
 
 func toggle_research() -> void:
-	if state.phase >= State.Phase.FIELD_REPAIR:
+	if insight_popup.visible:
+		open_first_insight()
+	elif state.phase >= State.Phase.FIELD_REPAIR:
 		research.visible = not research.visible
 
 func restart() -> void:
@@ -183,6 +220,7 @@ func restart() -> void:
 	selected = ""
 	map.reset_view()
 	designation.clear()
+	insight_popup.hide()
 	research.hide()
 	refresh()
 	designation.grab_focus()
@@ -221,10 +259,15 @@ func refresh() -> void:
 		var available := state.command_for(selected)
 		if not available.is_empty():
 			contact_details.text += "\nRight-click · %s" % available
+	work_panel.visible = not state.work_action.is_empty()
+	if work_panel.visible:
+		var progress := state.work_fraction() * 100.0
+		work_caption.text = "%s   %d%%" % [State.WORK_LABELS[state.work_action], mini(99, floori(progress))]
+		work_progress.value = progress
 	cargo.visible = phase >= State.Phase.FIELD_REPAIR
 	cargo.text = "CONTROLLER CARGO   %d / %d\nOre ×%d   ·   Spare parts ×%d" % [state.ore + state.parts, State.HOLD, state.ore, state.parts]
 	if phase == State.Phase.HAULING:
-		cargo.text += "\n\nWRECK STOCKPILE\nOre ×%d   ·   Deliveries %d\nMiner cargo ×%d" % [state.stock_ore, state.deliveries, state.miner_cargo]
+		cargo.text += "\n\nWRECK STOCKPILE\nOre ×%d   ·   Deliveries %d\nMiner cargo ×%d\n%s" % [state.stock_ore, state.deliveries, state.miner_cargo, state.miner_status()]
 	notice.text = state.notice if state.notice_time > 0 else ""
 	notice.visible = not notice.text.is_empty()
 	research_title.text = "◆  Field Repair"

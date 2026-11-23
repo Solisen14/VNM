@@ -8,8 +8,24 @@ const GRID := 32
 const SENSOR_RANGE := 245.0
 const INTERACT_RANGE := 82.0
 const TURN_SPEED := 1.42
-const ACCELERATION := 105.0
-const MAX_SPEED := 205.0
+const ACCELERATION := 75.0
+const MAX_SPEED := 145.0
+const MINER_SPEED := 160.0
+const MINER_ACCELERATION := 95.0
+const MINER_EXTRACTION_TIME := 8.0
+const MINER_UNLOAD_TIME := 5.0
+const WORK_TIMES := {
+	"Approach and scan": 3.5,
+	"Extract ore sample": 6.0,
+	"Recover spare part": 4.5,
+	"Repair mining drone": 7.0,
+}
+const WORK_LABELS := {
+	"Approach and scan": "Scanning contact",
+	"Extract ore sample": "Extracting ore",
+	"Recover spare part": "Recovering spare part",
+	"Repair mining drone": "Repairing miner",
+}
 const WORLD := Rect2(-2200, -1550, 4700, 3450)
 const FIELD := Vector2(530, -215)
 const MINER := Vector2(405, 395)
@@ -30,6 +46,9 @@ var destination := Vector2.ZERO
 var has_destination := false
 var pending_contact := ""
 var pending_action := ""
+var work_contact := ""
+var work_action := ""
+var work_time := 0.0
 var chart := {}
 var scanned := {}
 var salvaged := {}
@@ -46,7 +65,8 @@ var miner_cargo := 0
 var stock_ore := 0
 var deliveries := 0
 var to_field := true
-var mining_time := 0.0
+var miner_work_time := 0.0
+var miner_speed := 0.0
 var notice := ""
 var notice_time := 0.0
 
@@ -79,6 +99,7 @@ func tick(delta: float, turn: float, thrust: float) -> void:
 				set_phase(Phase.CONTACTS)
 	if phase >= Phase.FLIGHT:
 		fly(delta, turn, thrust)
+		tick_work(delta)
 	if phase == Phase.FLIGHT and turned and thrust_used:
 		set_phase(Phase.WAYFINDING)
 	if phase == Phase.HAULING:
@@ -89,6 +110,7 @@ func fly(delta: float, turn: float, thrust: float) -> void:
 		has_destination = false
 		pending_contact = ""
 		pending_action = ""
+		cancel_work()
 		heading = wrapf(heading + turn * TURN_SPEED * delta, -PI, PI)
 		turned = turned or turn != 0
 		thrust_used = thrust_used or thrust != 0
@@ -133,6 +155,7 @@ func mark_zoom(previous: float, current: float) -> void:
 func plot_move(point: Vector2) -> void:
 	if phase < Phase.WAYFINDING:
 		return
+	cancel_work()
 	destination = point.clamp(WORLD.position + Vector2.ONE, WORLD.end - Vector2.ONE)
 	has_destination = true
 	pending_contact = ""
@@ -148,7 +171,7 @@ func arrive() -> void:
 		pending_contact = ""
 		pending_action = ""
 		if player.distance_to(position_of(contact)) <= INTERACT_RANGE:
-			execute(contact, action)
+			start_work(contact, action)
 
 func position_of(contact: String) -> Vector2:
 	match contact:
@@ -188,17 +211,48 @@ func command_for(contact: String) -> String:
 
 func issue(contact: String) -> void:
 	var action := command_for(contact)
-	if action.is_empty():
+	if action.is_empty() or contact == work_contact or contact == pending_contact:
 		return
 	if action == "Assign miner to this field":
 		execute(contact, action)
 		return
-	if player.distance_to(position_of(contact)) <= INTERACT_RANGE and velocity.length() <= 30:
-		execute(contact, action)
+	if player.distance_to(position_of(contact)) <= INTERACT_RANGE and velocity.length() <= 25:
+		has_destination = false
+		pending_contact = ""
+		pending_action = ""
+		start_work(contact, action)
 		return
 	plot_move(position_of(contact))
 	pending_contact = contact
 	pending_action = action
+
+func start_work(contact: String, action: String) -> void:
+	work_contact = contact
+	work_action = action
+	work_time = 0.0
+
+func cancel_work() -> void:
+	work_contact = ""
+	work_action = ""
+	work_time = 0.0
+
+func tick_work(delta: float) -> void:
+	if work_action.is_empty():
+		return
+	if player.distance_to(position_of(work_contact)) > INTERACT_RANGE or command_for(work_contact) != work_action:
+		cancel_work()
+		return
+	work_time += delta
+	if work_time >= float(WORK_TIMES[work_action]):
+		var contact := work_contact
+		var action := work_action
+		cancel_work()
+		execute(contact, action)
+
+func work_fraction() -> float:
+	if work_action.is_empty():
+		return 0.0
+	return minf(work_time / float(WORK_TIMES[work_action]), 1.0)
 
 func execute(contact: String, action: String) -> void:
 	if command_for(contact) != action:
@@ -244,23 +298,36 @@ func contact_name(contact: String) -> String:
 
 func tick_miner(delta: float) -> void:
 	var target := FIELD if to_field else STOCKPILE
-	if miner_position != target:
+	var distance := miner_position.distance_to(target)
+	if distance > 0.0:
+		var target_speed := minf(MINER_SPEED, sqrt(2 * MINER_ACCELERATION * distance))
+		miner_speed = move_toward(miner_speed, target_speed, MINER_ACCELERATION * delta)
 		miner_heading = miner_position.angle_to_point(target)
-		miner_position = miner_position.move_toward(target, 290.0 * delta)
+		miner_position = miner_position.move_toward(target, miner_speed * delta)
 		return
+	miner_speed = 0.0
+	miner_work_time += delta
+	var duration := MINER_EXTRACTION_TIME if to_field else MINER_UNLOAD_TIME
+	if miner_work_time < duration:
+		return
+	miner_work_time = 0.0
 	if to_field:
-		mining_time += delta
-		if mining_time >= 1.6:
-			mining_time = 0
-			miner_cargo = 3
-			to_field = false
+		miner_cargo = 3
 	else:
 		stock_ore += miner_cargo
 		miner_cargo = 0
-		to_field = true
 		deliveries += 1
 		if deliveries == 1:
 			report("First automated delivery · 3 ore at the wreck")
+	to_field = not to_field
+
+func miner_status() -> String:
+	var target := FIELD if to_field else STOCKPILE
+	if miner_position != target:
+		return "Flying to ore field" if to_field else "Hauling ore to the wreck"
+	var duration := MINER_EXTRACTION_TIME if to_field else MINER_UNLOAD_TIME
+	var action := "Mining ore" if to_field else "Unloading ore"
+	return "%s   %d%%" % [action, mini(99, floori(miner_work_time / duration * 100.0))]
 
 func report(message: String) -> void:
 	notice = message

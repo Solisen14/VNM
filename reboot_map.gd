@@ -107,14 +107,24 @@ func _draw() -> void:
 	if state.phase >= State.Phase.ORDERS:
 		if state.is_charted(state.miner_position):
 			draw_craft(state.miner_position, state.miner_heading, CYAN, true, 0.85)
+			if state.miner_work_time > 0:
+				var duration := State.MINER_EXTRACTION_TIME if state.to_field else State.MINER_UNLOAD_TIME
+				draw_work_arc(screen_point(state.miner_position), 13, state.miner_work_time / duration)
 		else:
 			reticle(screen_point(state.miner_position), Color(CYAN, 0.65), 7)
 	for contact in State.CONTACTS:
 		if state.is_visible(contact):
 			draw_contact(state, contact)
 	draw_controller(state)
+	if not state.work_action.is_empty():
+		draw_work_arc(screen_point(state.player), 32 * clampf(zoom, 0.5, 1.55), state.work_fraction())
 	draw_string(get_theme_default_font(), Vector2(17, size.y - 18),
 		"LOCAL SENSOR RANGE  /  %d%% VIEW" % roundi(zoom * 100), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, CYAN)
+
+func draw_work_arc(point: Vector2, radius: float, fraction: float) -> void:
+	draw_arc(point, radius, 0, TAU, 48, Color(CYAN, 0.22), 1.0, true)
+	if fraction > 0:
+		draw_arc(point, radius, -PI / 2, -PI / 2 + TAU * fraction, 48, CYAN, 2.0, true)
 
 func draw_chart_background() -> void:
 	for i in range(125):

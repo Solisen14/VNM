@@ -14,7 +14,7 @@ Choose your designation and follow the systems as they come online. Use **Q / E*
 
 The controller charts the space along its flight path. Miner 031 can work through the fog and report its cargo without charting terrain.
 
-Scan the ore field, damaged miner and wreck of the MCV Asterion. **Field Repair** opens in the Insights panel (**T**). Collect 3 ore from the field and one spare part from each of the two wrecked drones, then return to the miner and repair it. Right-click the ore field again to start a standing haul to the wreck stockpile.
+Scan the ore field, damaged miner and wreck of the MCV Asterion. **Field Repair** appears in a first-Insight pop-up. Press **I** or use the pop-up button to open the Insights panel. Collect 3 ore from the field and one spare part from each of the two wrecked drones, then return to the miner and repair it. Right-click the ore field again to start a standing haul to the wreck stockpile.
 
 ## Earlier Dock 03 mission
 
