@@ -2,7 +2,7 @@ config_version=5
 
 [application]
 config/name="VNM"
-run/main_scene="res://dock_03.tscn"
+run/main_scene="res://reboot.tscn"
 config/features=PackedStringArray("4.0", "GL Compatibility")
 
 [display]

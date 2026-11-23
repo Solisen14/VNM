@@ -1,6 +1,6 @@
 # VNM
 
-A Godot 4 prototype about five surviving control drones. The project opens at Dock 03.
+A Godot 4 prototype about five surviving control drones. The project opens at the controller’s safe-mode reboot.
 
 ## Run
 
@@ -8,7 +8,17 @@ A Godot 4 prototype about five surviving control drones. The project opens at Do
 2. Open Godot 4. In Project Manager, click **Import** and select `project.godot`.
 3. Press **F5** to play.
 
-## Dock 03
+## Reboot and Field Repair
+
+Choose your designation and follow the systems as they come online. Use **Q / E** or the mouse wheel to zoom, **A / D** to turn, and **W / S** for forward and reverse thrust. **Left-click** a waypoint to fly there under autopilot. **Right-click** a contact to approach and carry out its available action. Use **Frame signals** to see the search area again and **Follow controller** to return the camera to your ship.
+
+The controller charts the space along its flight path. Miner 031 can work through the fog and report its cargo without charting terrain.
+
+Scan the ore field, damaged miner and wreck of the MCV Asterion. **Field Repair** opens in the Insights panel (**T**). Collect 3 ore from the field and one spare part from each of the two wrecked drones, then return to the miner and repair it. Right-click the ore field again to start a standing haul to the wreck stockpile.
+
+## Earlier Dock 03 mission
+
+Open `dock_03.tscn` and press **F6** to run the earlier Dock 03 mission.
 
 After the fleet recall, watch the local network reboot or choose **Skip opening**. Move with **WASD** or right-click a point on the map. Left-click a contact, fly within reach, and use the action in the sidebar. Middle-drag pans and the mouse wheel zooms. **Follow drone** recenters the camera.
 
