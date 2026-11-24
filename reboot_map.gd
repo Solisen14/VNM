@@ -1,22 +1,22 @@
 extends "res://dock_map.gd"
 
 const State = preload("res://reboot_state.gd")
+const OreField = preload("res://ore_field.gd")
 const FOG := Color("#070d10")
 const HULL_BOUNDS := Rect2(380, 45, 2020, 1136)
 const SIGNAL_OFFSETS := [Vector2(-32, 30), Vector2(43, 26), Vector2(-52, -28)]
 # A modest editable surface is mapped onto the existing mothership artwork.
 # The holes reveal machinery underneath rather than simulating free-moving atoms.
-const FIELD_IMAGE_SIZE := Vector2i(160, 124)
-const FIELD_BOUNDS := Rect2(290, -401, 480, 372)
+const ROCK_IMAGE_EDGE := 48
 const HULL_PEEL_BOUNDS := Rect2(1100, 245, 360, 220)
 const CUT_TILE := 4
 
 var hover := ""
-var field_image: Image
-var field_texture: ImageTexture
-var field_cells: Array[Vector2i] = []
-var field_original_colors: Array[Color] = []
-var field_erased := 0
+var rock_images: Array[Image] = []
+var rock_textures: Array[ImageTexture] = []
+var rock_cells: Array = []
+var rock_original_colors: Array = []
+var rock_erased := PackedInt32Array()
 var wreck_image: Image
 var wreck_texture: ImageTexture
 var wreck_cells: Array[Vector2i] = []
@@ -68,6 +68,10 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 	elif event is InputEventMouseMotion:
 		hover = at_marker(event.position)
+		if hover.is_empty() and game.state.scanned.has("ore"):
+			var under_cursor := world_point(event.position)
+			if game.state.is_charted(under_cursor) and OreField.within_field(under_cursor):
+				hover = "ore"
 		if dragging:
 			camera -= event.relative / zoom
 			accept_event()
@@ -122,8 +126,8 @@ func _draw() -> void:
 		var end := screen_point(state.destination)
 		draw_dashed_line(screen_point(state.player), end, Color(CYAN, 0.52), 1.2, 7.0)
 		reticle(end, CYAN, 10)
-	if state.phase == State.Phase.HAULING:
-		var source := State.HULL_WORKSITE if state.salvage_mode else State.FIELD
+	if state.phase == State.Phase.HAULING and state.miner_rock >= 0:
+		var source := State.HULL_WORKSITE if state.salvage_mode else state.miner_worksite
 		draw_route_hint(screen_point(source), screen_point(State.STOCKPILE))
 	if state.phase >= State.Phase.ORDERS:
 		if state.is_charted(state.miner_position):
@@ -137,6 +141,7 @@ func _draw() -> void:
 		if state.is_visible(contact):
 			draw_contact(state, contact)
 	draw_controller(state)
+	draw_field_composition(state)
 	if not state.work_action.is_empty():
 		draw_work_arc(screen_point(state.player), 32 * clampf(zoom, 0.5, 1.55), state.work_fraction())
 	draw_string(get_theme_default_font(), Vector2(17, size.y - 18),
@@ -198,34 +203,47 @@ func draw_fog(state: State) -> void:
 				start = x + 1
 
 func build_ore_pixels() -> void:
-	field_image = Image.create_empty(FIELD_IMAGE_SIZE.x, FIELD_IMAGE_SIZE.y, false, Image.FORMAT_RGBA8)
-	field_image.fill(Color.TRANSPARENT)
-	field_cells.clear()
-	var metals := [Color("#777870"), Color("#a38b70"), Color("#758b8e"), Color("#494d48")]
-	for i in range(26):
-		var offset := Vector2.from_angle(i * 2.39996) * sqrt(float(i)) * 21.0
-		var center := (State.FIELD + offset - FIELD_BOUNDS.position) / 3.0
-		var radius := float(8 + (i * 9 % 13)) / 3.0
-		for y in range(maxi(0, floori(center.y - radius - 2)), mini(FIELD_IMAGE_SIZE.y, ceili(center.y + radius + 3))):
-			for x in range(maxi(0, floori(center.x - radius - 2)), mini(FIELD_IMAGE_SIZE.x, ceili(center.x + radius + 3))):
-				var point := Vector2(x, y) - center
-				var edge := radius * (0.88 + 0.10 * sin(atan2(point.y, point.x) * 6.0 + float(i)))
-				if point.length() <= edge:
-					var material_id := posmod(x * 17 + y * 31 + i * 11, 13)
-					var tint: Color = metals[0 if material_id < 6 else (1 if material_id < 9 else (2 if material_id < 12 else 3))]
-					field_image.set_pixel(x, y, tint)
-	for y in range(FIELD_IMAGE_SIZE.y):
-		for x in range(FIELD_IMAGE_SIZE.x):
-			if field_image.get_pixel(x, y).a > 0.1:
-				field_cells.append(Vector2i(x, y))
-	field_cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
-		return Vector2(a).distance_squared_to(Vector2(80, 62)) < Vector2(b).distance_squared_to(Vector2(80, 62))
-	)
-	field_original_colors.clear()
-	for p in field_cells:
-		field_original_colors.append(field_image.get_pixel(p.x, p.y))
-	field_texture = ImageTexture.create_from_image(field_image)
-	field_erased = 0
+	# Independent transparent textures: each asteroid is consumed from the
+	# edge facing the stockpile, not from the field's central POI marker.
+	rock_images.clear()
+	rock_textures.clear()
+	rock_cells.clear()
+	rock_original_colors.clear()
+	rock_erased.clear()
+	var colors := [Color("#777c78"), Color("#a18d7f"), Color("#697b7e"), Color("#535b57")]
+	for index in range(OreField.ROCK_COUNT):
+		var image := Image.create_empty(ROCK_IMAGE_EDGE, ROCK_IMAGE_EDGE, false, Image.FORMAT_RGBA8)
+		image.fill(Color.TRANSPARENT)
+		var cells: Array[Vector2i] = []
+		var center := Vector2.ONE * float(ROCK_IMAGE_EDGE) * 0.5
+		var radius := float(ROCK_IMAGE_EDGE) * 0.43
+		for y in range(ROCK_IMAGE_EDGE):
+			for x in range(ROCK_IMAGE_EDGE):
+				var offset := Vector2(float(x), float(y)) - center
+				var angle := atan2(offset.y, offset.x)
+				var rough_edge := radius * (0.90 + 0.11 * sin(angle * 7.0 + float(index)) +
+					0.05 * cos(angle * 13.0 + float(index) * 2.3))
+				if offset.length() > rough_edge:
+					continue
+				var material_id := posmod(x * 17 + y * 31 + index * 11, 13)
+				var tint: Color = colors[0 if material_id < 6 else (1 if material_id < 9 else (2 if material_id < 12 else 3))]
+				image.set_pixel(x, y, tint)
+				cells.append(Vector2i(x, y))
+		var face := (OreField.near_surface(index, State.STOCKPILE) - OreField.rock_center(index)).normalized()
+		# Sort by the stockpile-facing exposed surface, with a ragged face.
+		cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+			var da := (Vector2(a) - center).dot(face) + 1.2 * sin(float(a.x * 3 + a.y * 7))
+			var db := (Vector2(b) - center).dot(face) + 1.2 * sin(float(b.x * 3 + b.y * 7))
+			return da > db
+		)
+		var originals: Array[Color] = []
+		for pixel in cells:
+			originals.append(image.get_pixel(pixel.x, pixel.y))
+		rock_images.append(image)
+		rock_textures.append(ImageTexture.create_from_image(image))
+		rock_cells.append(cells)
+		rock_original_colors.append(originals)
+		rock_erased.append(0)
 
 func build_wreck_pixels() -> void:
 	if hull == null:
@@ -255,19 +273,25 @@ func build_wreck_pixels() -> void:
 	wreck_erased = 0
 
 func sync_matter_visuals(state: State) -> void:
-	if field_texture != null:
-		var field_target := clampi(floori(float(field_cells.size()) * state.field_cut_fraction()), 0, field_cells.size())
-		if field_target != field_erased:
-			while field_erased < field_target:
-				var p := field_cells[field_erased]
-				field_image.set_pixel(p.x, p.y, Color.TRANSPARENT)
-				field_erased += 1
-			# A cancelled manual extraction has not transferred matter yet.
-			while field_erased > field_target:
-				field_erased -= 1
-				var p := field_cells[field_erased]
-				field_image.set_pixel(p.x, p.y, field_original_colors[field_erased])
-			field_texture.update(field_image)
+	for index in range(OreField.ROCK_COUNT):
+		var image: Image = rock_images[index]
+		var cells: Array = rock_cells[index]
+		var originals: Array = rock_original_colors[index]
+		var current := rock_erased[index]
+		var target := clampi(floori(float(cells.size()) * state.rock_visual_units(index)), 0, cells.size())
+		if target == current:
+			continue
+		while current < target:
+			var cell: Vector2i = cells[current]
+			image.set_pixel(cell.x, cell.y, Color.TRANSPARENT)
+			current += 1
+		while current > target:
+			current -= 1
+			var cell: Vector2i = cells[current]
+			var original: Color = originals[current]
+			image.set_pixel(cell.x, cell.y, original)
+		rock_erased[index] = current
+		rock_textures[index].update(image)
 	if wreck_texture != null:
 		var wreck_target := clampi(floori(float(wreck_cells.size()) * state.hull_cut_fraction()), 0, wreck_cells.size())
 		# Limit large texture uploads to meaningful progress steps.
@@ -281,8 +305,41 @@ func sync_matter_visuals(state: State) -> void:
 			wreck_texture.update(wreck_image)
 
 func draw_ore_field() -> void:
-	if field_texture != null:
-		draw_texture_rect(field_texture, Rect2(screen_point(FIELD_BOUNDS.position), FIELD_BOUNDS.size * zoom), false)
+	for index in range(OreField.ROCK_COUNT):
+		var center := OreField.rock_center(index)
+		var radius := OreField.rock_radius(index)
+		var bounds := Rect2(center - Vector2.ONE * radius, Vector2.ONE * radius * 2.0)
+		draw_texture_rect(rock_textures[index], Rect2(screen_point(bounds.position), bounds.size * zoom), false)
+
+func draw_field_composition(state: State) -> void:
+	if not state.scanned.has("ore"):
+		return
+	if hover != "ore" and zoom < 1.65:
+		return
+	var anchor := screen_point(OreField.CENTER)
+	if anchor.x < -120.0 or anchor.x > size.x + 120.0 or anchor.y < -100.0 or anchor.y > size.y + 100.0:
+		return
+	var p := Vector2(
+		clampf(anchor.x + 30.0, 14.0, maxf(14.0, size.x - 248.0)),
+		clampf(anchor.y - 115.0, 42.0, maxf(42.0, size.y - 130.0))
+	)
+	var area := Rect2(p, Vector2(235, 119))
+	draw_rect(area, Color(0.045, 0.085, 0.105, 0.94))
+	draw_rect(area, Color(CYAN, 0.60), false, 1.0)
+	write(p + Vector2(11, 18), "FIELD 01  /  ELEMENTAL SCAN", CYAN, 12)
+	var left := state.field_remaining_material()
+	var available := int(left["Fe"]) + int(left["Cu"]) + int(left["Si"])
+	write(p + Vector2(11, 34), "RAW MATTER  %d / %d" % [available, OreField.TOTAL_UNITS], Color("#c1ced0"), 11)
+	for line in range(3):
+		var symbol := "Fe" if line == 0 else ("Cu" if line == 1 else "Si")
+		var remaining := int(left[symbol])
+		var initial := OreField.FE_UNITS if line == 0 else (OreField.CU_UNITS if line == 1 else OreField.SI_UNITS)
+		var pigment := Color("#a6b5b7") if line == 0 else (Color("#cf8e67") if line == 1 else Color("#d9c291"))
+		var y := p.y + 52.0 + float(line) * 19.0
+		write(Vector2(p.x + 11.0, y + 5.0), "%s %d%%" % [symbol, initial], pigment, 11)
+		draw_rect(Rect2(p.x + 91.0, y - 4.0, 108.0, 6.0), Color("#34464c"))
+		draw_rect(Rect2(p.x + 91.0, y - 4.0, 108.0 * float(remaining) / float(initial), 6.0), pigment)
+		write(Vector2(p.x + 203.0, y + 5.0), "%d" % remaining, Color("#c1ced0"), 11)
 
 func draw_buried_refinery(state: State) -> void:
 	var at := screen_point(State.HULL_WORKSITE + Vector2(36, 20))
