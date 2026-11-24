@@ -215,14 +215,14 @@ func command_for(contact: String) -> String:
 				return "Extract ore sample"
 			if phase == Phase.ORDERS:
 				return "Assign miner to this field"
-			if phase == Phase.HAULING and salvage_mode:
+			if phase == Phase.HAULING and salvage_mode and (not to_field or miner_work_time == 0.0):
 				return "Resume ore hauling"
 		"parts_a", "parts_b": return "Recover spare part"
 		"miner":
 			if phase == Phase.FIELD_REPAIR and ore >= ORE_REQUIRED and parts >= PARTS_REQUIRED:
 				return "Repair mining drone"
 		"wreck":
-			if phase == Phase.HAULING and deliveries > 0 and not salvage_mode and hull_extracted < HULL_RESERVE:
+			if phase == Phase.HAULING and deliveries > 0 and not salvage_mode and hull_extracted < HULL_RESERVE and (not to_field or miner_work_time == 0.0):
 				return "Assign miner to strip hull"
 	return ""
 
@@ -305,13 +305,15 @@ func execute(contact: String, action: String) -> void:
 			salvage_mode = true
 			if miner_cargo == 0:
 				to_field = true
-			miner_work_time = 0.0
+			if miner_cargo == 0:
+				miner_work_time = 0.0
 			report("Hull salvage assigned · Peeling back the Asterion")
 		"Resume ore hauling":
 			salvage_mode = false
 			if miner_cargo == 0:
 				to_field = true
-			miner_work_time = 0.0
+			if miner_cargo == 0:
+				miner_work_time = 0.0
 			report("Miner 031 reassigned · Ore hauling")
 
 func contact_name(contact: String) -> String:
