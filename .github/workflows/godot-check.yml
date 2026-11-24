@@ -29,3 +29,5 @@ jobs:
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --quit-after 60
       - name: Tutorial regression smoke
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass1_smoke.gd
+      - name: Autonomous mining and resource economy regression
+        run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass2_smoke.gd
