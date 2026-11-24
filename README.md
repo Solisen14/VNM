@@ -16,6 +16,18 @@ The controller charts the space along its flight path. Miner 031 can work throug
 
 Scan the ore field, damaged miner and wreck of the MCV Asterion. **Field Repair** appears in a first-Insight pop-up. Press **I** or use the pop-up button to open the Insights panel. Collect 3 ore from the field and one spare part from each of the two wrecked drones, then return to the miner and repair it. Right-click the ore field again to start a standing haul to the wreck stockpile.
 
+## Destructible matter / Asterion excavation experiment
+
+The safe-mode reboot, three initial scans, Field Repair Insight (I), three ore plus two spare parts, miner repair and first automated ore delivery are unchanged.
+
+- The ore field is now a deterministic, pixel-based material surface. Mining (including the player's initial sample) gradually erodes the visible rocks as a **finite** deposit is consumed.
+- **After the first automated ore delivery**, right-click the scanned **MCV Asterion** to reassign Miner 031 to hull reclamation. The miner cuts in visible stages, transports three units of mixed raw hull material per run, and unloads at the same stockpile.
+- A narrow section of the mothership is layered: stripping the outer image gradually reveals its damaged **refinery assembly** underneath. This is the first recoverable subsystem, **not** an operational refinery yet. The hull section has a finite salvage budget.
+- The HUD tracks ore, raw hull feedstock, deliveries, the current miner operation, and excavation progress. The basic miner still cannot chart unexplored space. **Restart** restores all excavated surfaces.
+- Right-click the ore field again if you want the miner to resume ore hauling. To prevent lost material, work orders cannot interrupt an active cutting cycle.
+
+**Prototype scope:** A visual material-cell mask with aggregated cargo and inventory, not individually simulated atoms. Refining, elemental sorting, printing components, and factory assembly are subsequent progression stages, not implemented in this reboot slice.
+
 ## Earlier Dock 03 mission
 
 Open `dock_03.tscn` and press **F6** to run the earlier Dock 03 mission.
