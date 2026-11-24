@@ -70,5 +70,31 @@ func _initialize() -> void:
 		"Extracted elemental matter does not match removed rock units")
 	assert(seen_rocks.size() >= 2, "Worker never changed a depleted worksite")
 	assert(game.chart.size() == chart_before, "Autonomous mining expanded explored terrain")
+	# Full flight integration: zero teleportation or fake arrival events.
+	var flight := State.new()
+	flight.begin("HAL")
+	flight.set_phase(State.Phase.CONTACTS)
+	for contact in State.PRIMARY:
+		flight.execute(contact, "Approach and scan")
+	flight.execute("ore", "Extract ore sample")
+	flight.execute("parts_a", "Recover spare part")
+	flight.execute("parts_b", "Recover spare part")
+	flight.execute("miner", "Repair mining drone")
+	var initial_rock := flight.miner_rock
+	var total_elapsed := 0.0
+	for frame in range(27000):
+		flight.tick_miner(1.0 / 30.0)
+		total_elapsed += 1.0 / 30.0
+		if flight.deliveries >= 5:
+			break
+	assert(flight.deliveries >= 5, "Autonomous miner cannot complete five actual flight cycles")
+	assert(flight.salvage_insight_ready, "Five actual flights did not mark Salvage milestone")
+	assert(flight.stock_ore == flight.stock_fe + flight.stock_cu + flight.stock_si,
+		"Real flight material delivery did not conserve the mineral mixture")
+	assert(flight.miner_rock != initial_rock or flight.rock_remaining(initial_rock) > 0,
+		"Worker stalled at a depleted asteroid")
+	assert(total_elapsed > 5.0 * (State.MINER_EXTRACTION_TIME + State.MINER_UNLOAD_TIME),
+		"Mining timings unexpectedly accelerated")
+
 	print("PASS: VNM Pass 2 autonomy, physical asteroid sites, 65/25/10 chemistry, range and cap")
 	quit(0)
