@@ -243,7 +243,11 @@ func refresh() -> void:
 	phase_heading.text = stages[phase]
 	prompt.text = PHASE_PROMPTS[phase]
 	if state.deliveries > 0:
-		prompt.text = "First delivery confirmed. Miner 031 will keep hauling ore to the wreck."
+		prompt.text = "First delivery confirmed. Right-click the Asterion to send Miner 031 to strip away the outer hull."
+	if state.salvage_mode:
+		prompt.text = "Hull recovery active. Watch the outer plating peel away and mixed material arrive at storage."
+	if state.refinery_exposed:
+		prompt.text = "Refinery assembly uncovered! It is damaged and not yet operational. Further recovery and processing come next."
 	var controls := "Scroll / Q and E to zoom"
 	if phase >= State.Phase.FLIGHT:
 		controls += "   ·   A/D turn   ·   W/S thrust"
@@ -267,7 +271,13 @@ func refresh() -> void:
 	cargo.visible = phase >= State.Phase.FIELD_REPAIR
 	cargo.text = "CONTROLLER CARGO   %d / %d\nOre ×%d   ·   Spare parts ×%d" % [state.ore + state.parts, State.HOLD, state.ore, state.parts]
 	if phase == State.Phase.HAULING:
-		cargo.text += "\n\nWRECK STOCKPILE\nOre ×%d   ·   Deliveries %d\nMiner cargo ×%d\n%s" % [state.stock_ore, state.deliveries, state.miner_cargo, state.miner_status()]
+		cargo.text += "\n\nWRECK STOCKPILE\nOre ×%d  ·  Hull feedstock ×%d\nOre runs %d  ·  Salvage runs %d\nMiner cargo ×%d\n%s" % [
+			state.stock_ore, state.hull_stock, state.deliveries, state.salvage_deliveries,
+			state.miner_cargo, state.miner_status()
+		]
+		if state.salvage_mode or state.hull_extracted > 0:
+			cargo.text += "\n\nASTERION EXCAVATION   %d%%" % roundi(state.hull_cut_fraction() * 100.0)
+			cargo.text += "\nRefinery: EXPOSED / DAMAGED" if state.refinery_exposed else "\nRefinery: BURIED"
 	notice.text = state.notice if state.notice_time > 0 else ""
 	notice.visible = not notice.text.is_empty()
 	research_title.text = "◆  Field Repair"
