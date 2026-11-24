@@ -16,8 +16,8 @@ const PHASE_PROMPTS := [
 	"Calling the Asterion and the mining fleet. Awaiting reply…",
 	"Investigate the three signals. Right-click each contact to approach and scan.",
 	"Gather ore and recover two spare parts. Return to the damaged miner to repair it.",
-	"Right-click the ore field to assign Miner 031 its first haul.",
-	"Miner 031 is working the field. Watch it deliver ore to the wreck stockpile."
+	"Miner 031 has rebooted and is selecting a mining worksite.",
+	"Miner 031 works autonomously. Watch its chosen asteroid recede from the surface as it carries ore home."
 ]
 
 var state := State.new()
@@ -239,15 +239,13 @@ func refresh() -> void:
 		footer.text = ""
 		return
 	var stages := ["", "", "LOCAL SENSORS ONLINE", "FLIGHT CONTROL ONLINE", "WAYFINDING ONLINE", "COMMUNICATIONS ONLINE",
-		"UNRESOLVED SIGNALS", "FIELD REPAIR", "MINER 031 ONLINE", "HAUL ROUTE ACTIVE"]
+		"UNRESOLVED SIGNALS", "FIELD REPAIR", "MINER 031 ONLINE", "AUTONOMOUS MINING"]
 	phase_heading.text = stages[phase]
 	prompt.text = PHASE_PROMPTS[phase]
-	if state.deliveries > 0:
-		prompt.text = "First delivery confirmed. Right-click the Asterion to send Miner 031 to strip away the outer hull."
-	if state.salvage_mode:
-		prompt.text = "Hull recovery active. Watch the outer plating peel away and mixed material arrive at storage."
-	if state.refinery_exposed:
-		prompt.text = "Refinery assembly uncovered! It is damaged and not yet operational. Further recovery and processing come next."
+	if state.deliveries > 0 and not state.salvage_insight_ready:
+		prompt.text = "Ore delivery %d complete. Miner 031 is selecting its next autonomous trip." % state.deliveries
+	if state.salvage_insight_ready:
+		prompt.text = "Five deliveries confirmed. The Salvage Insight is the next chapter; mothership disassembly remains locked for now."
 	var controls := "Scroll / Q and E to zoom"
 	if phase >= State.Phase.FLIGHT:
 		controls += "   ·   A/D turn   ·   W/S thrust"
@@ -270,21 +268,28 @@ func refresh() -> void:
 		work_progress.value = progress
 	cargo.visible = phase >= State.Phase.FIELD_REPAIR
 	cargo.text = "CONTROLLER CARGO   %d / %d\nOre ×%d   ·   Spare parts ×%d" % [state.ore + state.parts, State.HOLD, state.ore, state.parts]
-	if phase == State.Phase.HAULING:
-		cargo.text += "\n\nWRECK STOCKPILE\nOre ×%d  ·  Hull feedstock ×%d\nOre runs %d  ·  Salvage runs %d\nMiner cargo ×%d\n%s" % [
-			state.stock_ore, state.hull_stock, state.deliveries, state.salvage_deliveries,
-			state.miner_cargo, state.miner_status()
+	if phase >= State.Phase.HAULING:
+		var unmined: Dictionary = state.field_remaining_material()
+		cargo.text += "\n\nORE FIELD 01   RAW MATTER\nFe %d  ·  Cu %d  ·  Si %d remaining" % [
+			int(unmined["Fe"]), int(unmined["Cu"]), int(unmined["Si"])
 		]
-		if state.salvage_mode or state.hull_extracted > 0:
-			cargo.text += "\n\nASTERION EXCAVATION   %d%%" % roundi(state.hull_cut_fraction() * 100.0)
-			cargo.text += "\nRefinery: EXPOSED / DAMAGED" if state.refinery_exposed else "\nRefinery: BURIED"
+		cargo.text += "\n\nWRECK STOCKPILE  (%d units)\nFe %d  ·  Cu %d  ·  Si %d\nOre runs %d  ·  Miner cargo %d" % [
+			state.stock_ore, state.stock_fe, state.stock_cu, state.stock_si,
+			state.deliveries, state.miner_cargo
+		]
+		cargo.text += "\n\nWORKER NETWORK  %d / %d\nRange %d world units\n%s\n%s" % [
+			state.active_drones, State.DRONE_CAPACITY, int(State.COMMS_RANGE),
+			state.link_status(), state.miner_status()
+		]
 	notice.text = state.notice if state.notice_time > 0 else ""
 	notice.visible = not notice.text.is_empty()
 	research_title.text = "◆  Field Repair"
 	research_status.text = "Ore   %d / %d\nSpare parts   %d / %d\nRepair the damaged miner" % [state.ore, State.ORE_REQUIRED, state.parts, State.PARTS_REQUIRED]
-	if phase >= State.Phase.ORDERS:
+	if phase >= State.Phase.HAULING:
 		research_title.text += "  ✓"
-		research_status.text = "Complete\nMiner 031 restored. Work orders unlocked."
+		research_status.text = "Complete · Miner 031 restored.\nAutonomous extraction online.\nNext Insight: Salvage (5 deliveries)."
+		if state.salvage_insight_ready:
+			research_status.text += "\nThreshold reached; feature arrives in Pass 3."
 
 func refresh_boot() -> void:
 	var waiting := state.phase == State.Phase.SAFE_MODE
