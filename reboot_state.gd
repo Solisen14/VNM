@@ -14,6 +14,11 @@ const MINER_SPEED := 160.0
 const MINER_ACCELERATION := 95.0
 const MINER_EXTRACTION_TIME := 8.0
 const MINER_UNLOAD_TIME := 5.0
+# Visual pixels are batches of recoverable matter, not individual simulated atoms.
+const FIELD_RESERVE := 96
+const HULL_RESERVE := 12
+const HULL_CUT_TIME := 12.0
+const HULL_WORKSITE := Vector2(1275, 340)
 const WORK_TIMES := {
 	"Approach and scan": 3.5,
 	"Extract ore sample": 6.0,
@@ -55,6 +60,13 @@ var salvaged := {}
 var ore := 0
 var parts := 0
 var drill_loads := 6
+var field_extracted := 0
+var hull_extracted := 0
+var hull_stock := 0
+var salvage_deliveries := 0
+var salvage_mode := false
+var miner_cargo_type := "ore"
+var refinery_exposed := false
 var zoomed_in := false
 var zoomed_out := false
 var turned := false
@@ -203,17 +215,22 @@ func command_for(contact: String) -> String:
 				return "Extract ore sample"
 			if phase == Phase.ORDERS:
 				return "Assign miner to this field"
+			if phase == Phase.HAULING and salvage_mode:
+				return "Resume ore hauling"
 		"parts_a", "parts_b": return "Recover spare part"
 		"miner":
 			if phase == Phase.FIELD_REPAIR and ore >= ORE_REQUIRED and parts >= PARTS_REQUIRED:
 				return "Repair mining drone"
+		"wreck":
+			if phase == Phase.HAULING and deliveries > 0 and not salvage_mode and hull_extracted < HULL_RESERVE:
+				return "Assign miner to strip hull"
 	return ""
 
 func issue(contact: String) -> void:
 	var action := command_for(contact)
 	if action.is_empty() or contact == work_contact or contact == pending_contact:
 		return
-	if action == "Assign miner to this field":
+	if action in ["Assign miner to this field", "Assign miner to strip hull", "Resume ore hauling"]:
 		execute(contact, action)
 		return
 	if player.distance_to(position_of(contact)) <= INTERACT_RANGE and velocity.length() <= 25:
@@ -266,8 +283,10 @@ func execute(contact: String, action: String) -> void:
 				report("Insight recorded · Field Repair")
 		"Extract ore sample":
 			var amount := mini(ORE_REQUIRED - ore, mini(drill_loads, HOLD - ore - parts))
+			amount = mini(amount, FIELD_RESERVE - field_extracted)
 			drill_loads -= amount
 			ore += amount
+			field_extracted += amount
 			report("Ore collected · %d/%d" % [ore, ORE_REQUIRED])
 		"Recover spare part":
 			if ore + parts < HOLD:
@@ -282,6 +301,18 @@ func execute(contact: String, action: String) -> void:
 		"Assign miner to this field":
 			set_phase(Phase.HAULING)
 			report("Miner 031 assigned · Ore field → Wreck stockpile")
+		"Assign miner to strip hull":
+			salvage_mode = true
+			if miner_cargo == 0:
+				to_field = true
+			miner_work_time = 0.0
+			report("Hull salvage assigned · Peeling back the Asterion")
+		"Resume ore hauling":
+			salvage_mode = false
+			if miner_cargo == 0:
+				to_field = true
+			miner_work_time = 0.0
+			report("Miner 031 reassigned · Ore hauling")
 
 func contact_name(contact: String) -> String:
 	match contact:
@@ -297,7 +328,8 @@ func contact_name(contact: String) -> String:
 	return "No contact selected"
 
 func tick_miner(delta: float) -> void:
-	var target := FIELD if to_field else STOCKPILE
+	var source := HULL_WORKSITE if salvage_mode else FIELD
+	var target := source if to_field else STOCKPILE
 	var distance := miner_position.distance_to(target)
 	if distance > 0.0:
 		var target_speed := minf(MINER_SPEED, sqrt(2 * MINER_ACCELERATION * distance))
@@ -306,28 +338,70 @@ func tick_miner(delta: float) -> void:
 		miner_position = miner_position.move_toward(target, miner_speed * delta)
 		return
 	miner_speed = 0.0
-	miner_work_time += delta
-	var duration := MINER_EXTRACTION_TIME if to_field else MINER_UNLOAD_TIME
-	if miner_work_time < duration:
-		return
-	miner_work_time = 0.0
 	if to_field:
-		miner_cargo = 3
+		var remaining := HULL_RESERVE - hull_extracted if salvage_mode else FIELD_RESERVE - field_extracted
+		if remaining <= 0:
+			return # Do not create matter when a source has been exhausted.
+		miner_work_time += delta
+		var duration := HULL_CUT_TIME if salvage_mode else MINER_EXTRACTION_TIME
+		if miner_work_time < duration:
+			return
+		miner_work_time = 0.0
+		miner_cargo = mini(3, remaining)
+		if salvage_mode:
+			hull_extracted += miner_cargo
+			miner_cargo_type = "hull"
+			if hull_extracted >= 9 and not refinery_exposed:
+				refinery_exposed = true
+				report("Asterion subsystem exposed · Damaged refinery assembly")
+		else:
+			field_extracted += miner_cargo
+			miner_cargo_type = "ore"
 	else:
-		stock_ore += miner_cargo
+		miner_work_time += delta
+		if miner_work_time < MINER_UNLOAD_TIME:
+			return
+		miner_work_time = 0.0
+		if miner_cargo_type == "hull":
+			hull_stock += miner_cargo
+			salvage_deliveries += 1
+			if salvage_deliveries == 1:
+				report("First hull feedstock delivered · Wreck excavation underway")
+		else:
+			stock_ore += miner_cargo
+			deliveries += 1
+			if deliveries == 1:
+				report("First automated delivery · 3 ore at the wreck")
 		miner_cargo = 0
-		deliveries += 1
-		if deliveries == 1:
-			report("First automated delivery · 3 ore at the wreck")
 	to_field = not to_field
 
 func miner_status() -> String:
-	var target := FIELD if to_field else STOCKPILE
-	if miner_position != target:
-		return "Flying to ore field" if to_field else "Hauling ore to the wreck"
-	var duration := MINER_EXTRACTION_TIME if to_field else MINER_UNLOAD_TIME
-	var action := "Mining ore" if to_field else "Unloading ore"
+	var target := (HULL_WORKSITE if salvage_mode else FIELD) if to_field else STOCKPILE
+	if miner_position.distance_to(target) > 0.01:
+		if to_field:
+			return "Flying to Asterion hull" if salvage_mode else "Flying to ore field"
+		return "Hauling raw hull material" if miner_cargo_type == "hull" else "Hauling ore to the wreck"
+	if to_field:
+		var remaining := HULL_RESERVE - hull_extracted if salvage_mode else FIELD_RESERVE - field_extracted
+		if remaining <= 0:
+			return "Salvage zone depleted" if salvage_mode else "Ore field depleted"
+	var duration := (HULL_CUT_TIME if salvage_mode else MINER_EXTRACTION_TIME) if to_field else MINER_UNLOAD_TIME
+	var action := ("Stripping hull" if salvage_mode else "Mining ore") if to_field else "Unloading cargo"
 	return "%s   %d%%" % [action, mini(99, floori(miner_work_time / duration * 100.0))]
+
+func field_cut_fraction() -> float:
+	var progress := float(field_extracted)
+	if work_action == "Extract ore sample":
+		progress += 3.0 * work_fraction()
+	if phase == Phase.HAULING and not salvage_mode and to_field and miner_position.distance_to(FIELD) <= 0.01:
+		progress += 3.0 * clampf(miner_work_time / MINER_EXTRACTION_TIME, 0.0, 1.0)
+	return clampf(progress / FIELD_RESERVE, 0.0, 1.0)
+
+func hull_cut_fraction() -> float:
+	var progress := float(hull_extracted)
+	if phase == Phase.HAULING and salvage_mode and to_field and miner_position.distance_to(HULL_WORKSITE) <= 0.01:
+		progress += 3.0 * clampf(miner_work_time / HULL_CUT_TIME, 0.0, 1.0)
+	return clampf(progress / HULL_RESERVE, 0.0, 1.0)
 
 func report(message: String) -> void:
 	notice = message
