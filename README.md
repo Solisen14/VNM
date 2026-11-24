@@ -16,6 +16,18 @@ The controller charts the space along its flight path. Miner 031 can work throug
 
 Scan the ore field, damaged miner and wreck of the MCV Asterion. **Field Repair** appears in a first-Insight pop-up. Press **I** or use the pop-up button to open the Insights panel. Collect 3 ore from the field and one spare part from each of the two wrecked drones, then return to the miner and repair it. Right-click the ore field again to start a standing haul to the wreck stockpile.
 
+## Pass 1: Physical scale and luminous worker movement
+
+This update **preserves the existing reboot and Field Repair tutorial**. Only the visual size, camera zoom and Miner 031 flight behaviour change.
+
+- **Physical proportions:** Asterion ~5 km, original control craft ~25 m, mining workers ~4 m. The existing 2020-world-unit hull is treated as the 5 km reference, so a worker really is tiny beside it. On-screen reticles and labels remain readable.
+- **Worker rendering:** Miner 031 is a bright white point with a subtle halo and a slightly altered cargo glow. At extreme close-up zoom, a minimal directional crossbar becomes visible. A disabled worker is a dim point, not a full triangular ship sprite.
+- **Flight behaviour:** Miner 031 follows a shared destination-seeking steering model. It turns and accelerates gradually, drifts in small deterministic lateral curves, slows for mining/unloading and retains the original finite material / delivery accounting. It still cannot reveal fog.
+- **Camera:** Scroll or Q/E can now zoom from 0.18× to 8×. A metre scale bar sits in the lower-right of the map. **Frame signals** continues to show the broader tutorial area.
+- **Separate flight lab:** In Godot, open `swarm_lab.tscn` and press **F6** to preview **1, 10, 100 or 1,000** luminous workers moving using exactly the same motion helper (`worker_motion.gd`). This scene tests rendering and steering only; it is not part of the tutorial's production economy and does not chart terrain.
+
+This is **Pass 1**, not full flocking. Neighbour separation/cohesion, site-specific cutting positions, and large-scale worker aggregation belong to later passes. The player ship still uses its original procedural silhouette at the corrected physical scale; its modular sprite system is planned for Pass 3.
+
 ## Destructible matter / Asterion excavation experiment
 
 The safe-mode reboot, three initial scans, Field Repair Insight (I), three ore plus two spare parts, miner repair and first automated ore delivery are unchanged.
