@@ -378,7 +378,8 @@ func tick_miner(delta: float) -> void:
 	to_field = not to_field
 
 func miner_status() -> String:
-	var target := (HULL_WORKSITE if salvage_mode else FIELD) if to_field else STOCKPILE
+	var source := HULL_WORKSITE if salvage_mode else FIELD
+	var target := source if to_field else STOCKPILE
 	if miner_position.distance_to(target) > 0.01:
 		if to_field:
 			return "Flying to Asterion hull" if salvage_mode else "Flying to ore field"
