@@ -30,7 +30,7 @@ func _ready() -> void:
 
 func reset_view() -> void:
 	camera = Vector2.ZERO
-	zoom = 0.82
+	zoom = 1.35
 	following = true
 	dragging = false
 	hover = ""
@@ -42,7 +42,7 @@ func set_zoom(factor: float, anchor: Vector2) -> void:
 		return
 	var fixed := world_point(anchor)
 	var previous := zoom
-	zoom = clampf(zoom * factor, 0.22, 1.8)
+	zoom = clampf(zoom * factor, 0.18, 8.0)
 	camera += fixed - world_point(anchor)
 	game.state.mark_zoom(previous, zoom)
 	following = false
@@ -124,10 +124,10 @@ func _draw() -> void:
 		reticle(end, CYAN, 10)
 	if state.phase == State.Phase.HAULING:
 		var source := State.HULL_WORKSITE if state.salvage_mode else State.FIELD
-		draw_dashed_line(screen_point(source), screen_point(State.STOCKPILE), Color(CYAN, 0.42), 1.25, 8)
+		draw_route_hint(screen_point(source), screen_point(State.STOCKPILE))
 	if state.phase >= State.Phase.ORDERS:
 		if state.is_charted(state.miner_position):
-			draw_craft(state.miner_position, state.miner_heading, CYAN, true, 0.85)
+			draw_worker_light(state.miner_position, state.miner_heading, true, state.miner_cargo > 0)
 			if state.miner_work_time > 0:
 				var duration := (State.HULL_CUT_TIME if state.salvage_mode else State.MINER_EXTRACTION_TIME) if state.to_field else State.MINER_UNLOAD_TIME
 				draw_work_arc(screen_point(state.miner_position), 13, state.miner_work_time / duration)
@@ -141,6 +141,38 @@ func _draw() -> void:
 		draw_work_arc(screen_point(state.player), 32 * clampf(zoom, 0.5, 1.55), state.work_fraction())
 	draw_string(get_theme_default_font(), Vector2(17, size.y - 18),
 		"LOCAL SENSOR RANGE  /  %d%% VIEW" % roundi(zoom * 100), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, CYAN)
+	draw_scale_ruler()
+
+func draw_route_hint(from: Vector2, to: Vector2) -> void:
+	# A faint, schematic traffic corridor. Workers themselves steer along
+	# individual curved paths rather than snapping to this drawn line.
+	var axis := to - from
+	var normal := axis.orthogonal().normalized()
+	var bend := minf(30.0, axis.length() * 0.10)
+	var curve := PackedVector2Array()
+	for i in range(25):
+		var t := float(i) / 24.0
+		curve.append(from.lerp(to, t) + normal * sin(PI * t) * bend)
+	draw_polyline(curve, Color(CYAN, 0.24), 1.0, true)
+
+func draw_scale_ruler() -> void:
+	var scale_metres := 1000.0
+	if zoom > 5.0:
+		scale_metres = 25.0
+	elif zoom > 1.5:
+		scale_metres = 100.0
+	elif zoom > 0.55:
+		scale_metres = 500.0
+	var pixels := scale_metres / State.METRES_PER_WORLD_UNIT * zoom
+	var right := size.x - 20.0
+	var left := right - pixels
+	var y := size.y - 22.0
+	var tint := Color("#8ca6a2")
+	draw_line(Vector2(left, y), Vector2(right, y), tint, 1.5, true)
+	draw_line(Vector2(left, y - 4.0), Vector2(left, y + 3.0), tint, 1.5, true)
+	draw_line(Vector2(right, y - 4.0), Vector2(right, y + 3.0), tint, 1.5, true)
+	var caption := "%d m" % int(scale_metres)
+	write(Vector2(left, y - 8.0), caption, tint, 12)
 
 func draw_work_arc(point: Vector2, radius: float, fraction: float) -> void:
 	draw_arc(point, radius, 0, TAU, 48, Color(CYAN, 0.22), 1.0, true)
@@ -277,10 +309,14 @@ func draw_contact(state: State, contact: String) -> void:
 	if unresolved:
 		draw_arc(point, 18, 0, TAU, 30, Color(tint, 0.30), 1.0, true)
 	elif contact.begins_with("parts") and on_screen and state.is_charted(state.position_of(contact)):
-		draw_craft(state.position_of(contact), -0.52, AMBER, false, 0.77)
+		draw_worker_light(state.position_of(contact), -0.52, false)
 	elif contact == "miner" and on_screen and state.phase < State.Phase.ORDERS:
-		draw_craft(state.miner_position, -0.25, AMBER, false, 0.85)
-	reticle(point, tint, 12 if contact == game.selected else 8)
+		draw_worker_light(state.miner_position, -0.25, false)
+	var highlight := contact == game.selected or contact == hover
+	if contact != "miner" or state.phase < State.Phase.ORDERS or highlight:
+		reticle(point, tint, 12 if highlight else 8)
+	if contact == "miner" and state.phase >= State.Phase.ORDERS and not highlight:
+		return # Keep the active worker as a white dot until inspected.
 	var caption := state.contact_name(contact).to_upper()
 	if not on_screen:
 		caption += "  ·  OFF SCREEN"
@@ -288,20 +324,50 @@ func draw_contact(state: State, contact: String) -> void:
 		caption += "  /  " + state.command_for(contact).to_upper()
 	write(point + Vector2(14, -10), caption, tint, 12)
 
+func draw_worker_light(position: Vector2, angle: float, operating: bool, loaded := false) -> void:
+	var at := screen_point(position)
+	var screen_length := State.WORKER_WORLD_LENGTH * zoom
+	var core_radius := maxf(1.0, screen_length * 0.42)
+	var white := Color("#f1f8ff") if operating else Color("#87918e")
+	# One bright nucleus and a faint halo. No elaborate sprite is required.
+	if operating:
+		draw_circle(at, maxf(3.0, core_radius * 2.4), Color(0.73, 0.90, 1.0, 0.16), true)
+		draw_circle(at, core_radius, Color("#ffffff") if not loaded else Color("#d5edf6"), true)
+		if loaded:
+			draw_circle(at, maxf(2.3, core_radius * 1.45), Color(0.6, 0.9, 1.0, 0.17), false, 1.0)
+	else:
+		draw_circle(at, core_radius, white, true)
+	# Only at close inspection zoom does a small directional body appear.
+	if screen_length >= 6.0:
+		var direction := Vector2.from_angle(angle)
+		var side := direction.orthogonal()
+		var tip := at + direction * (screen_length * 0.55)
+		draw_line(at - direction * (screen_length * 0.4), tip, white, maxf(1.0, screen_length * 0.22), true)
+		draw_line(at + side * (screen_length * 0.22), at - side * (screen_length * 0.22), white, 1.0, true)
+
 func draw_controller(state: State) -> void:
 	var center := screen_point(state.player)
-	var unit := clampf(zoom, 0.5, 1.55)
-	var profile := PackedVector2Array([Vector2(-22,-11), Vector2(0,-11), Vector2(16,-7), Vector2(21,0), Vector2(16,7), Vector2(0,11), Vector2(-22,11), Vector2(-26,6), Vector2(-26,-6)])
+	# 25 m of ship across a 5 km mothership, rather than an icon that's 1/40
+	# the hull's length. The reticle and label remain legible when zoomed out.
+	var unit := State.CONTROLLER_WORLD_LENGTH * zoom / 47.0
+	var profile := PackedVector2Array([
+		Vector2(-22, -11), Vector2(0, -11), Vector2(16, -7),
+		Vector2(21, 0), Vector2(16, 7), Vector2(0, 11),
+		Vector2(-22, 11), Vector2(-26, 6), Vector2(-26, -6)
+	])
 	for i in range(profile.size()):
 		profile[i] = center + profile[i].rotated(state.heading) * unit
 	draw_colored_polygon(profile, Color("#727973"))
 	profile.append(profile[0])
-	draw_polyline(profile, Color("#c1c7b3"), 1.1, true)
+	draw_polyline(profile, Color("#c1c7b3"), 1.0, true)
 	var forward := Vector2.from_angle(state.heading)
 	var side := forward.orthogonal()
-	draw_line(center - forward * 11 * unit, center + forward * 15 * unit, Color("#242d2b"), 4 * unit, true)
+	draw_line(center - forward * 11 * unit, center + forward * 15 * unit,
+		Color("#242d2b"), maxf(1.0, 4.0 * unit), true)
 	for offset in [-6, 6]:
-		var port := center + (-forward * 23 + side * float(offset)) * unit
-		draw_circle(port, 3.0 * unit, Color(CYAN, 0.42 if state.velocity.length() < 8 else 0.90), true, -1, true)
-	reticle(center, CYAN, 27 * unit)
-	write(center + Vector2(27 * unit, 20), state.name_text.to_upper(), CYAN, 13)
+		var port := center + (-forward * 23.0 + side * float(offset)) * unit
+		draw_circle(port, maxf(0.85, 2.0 * unit),
+			Color(CYAN, 0.42 if state.velocity.length() < 8 else 0.90), true)
+	var marker_radius := maxf(9.0, 27.0 * unit)
+	reticle(center, CYAN, marker_radius)
+	write(center + Vector2(marker_radius + 6.0, 10.0), state.name_text.to_upper(), CYAN, 13)
