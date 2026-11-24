@@ -25,8 +25,6 @@ func _ready() -> void:
 	clip_contents = true
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	hull = load_ship_art("res://assets/mothership.webp")
-	build_ore_pixels()
-	build_wreck_pixels()
 	reset_view()
 
 func reset_view() -> void:
@@ -35,6 +33,8 @@ func reset_view() -> void:
 	following = true
 	dragging = false
 	hover = ""
+	build_ore_pixels()
+	build_wreck_pixels()
 
 func set_zoom(factor: float, anchor: Vector2) -> void:
 	if game.state.phase < State.Phase.SENSORS:
