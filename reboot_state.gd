@@ -1,5 +1,7 @@
 extends RefCounted
 
+const WorkerMotion = preload("res://worker_motion.gd")
+
 enum Phase { SAFE_MODE, DIAGNOSTICS, SENSORS, FLIGHT, WAYFINDING, COMMS, CONTACTS, FIELD_REPAIR, ORDERS, HAULING }
 const ORE_REQUIRED := 3
 const PARTS_REQUIRED := 2
@@ -10,8 +12,16 @@ const INTERACT_RANGE := 82.0
 const TURN_SPEED := 1.42
 const ACCELERATION := 75.0
 const MAX_SPEED := 145.0
-const MINER_SPEED := 160.0
-const MINER_ACCELERATION := 95.0
+const MINER_SPEED := 110.0
+const MINER_ACCELERATION := 70.0
+# The existing 2020-world-unit Asterion hull is approximately 5 km long.
+# Workers and founders retain their physical dimensions at any camera zoom.
+const ASTERION_LENGTH_METRES := 5000.0
+const CONTROLLER_LENGTH_METRES := 25.0
+const WORKER_LENGTH_METRES := 4.0
+const METRES_PER_WORLD_UNIT := ASTERION_LENGTH_METRES / 2020.0
+const CONTROLLER_WORLD_LENGTH := CONTROLLER_LENGTH_METRES / METRES_PER_WORLD_UNIT
+const WORKER_WORLD_LENGTH := WORKER_LENGTH_METRES / METRES_PER_WORLD_UNIT
 const MINER_EXTRACTION_TIME := 8.0
 const MINER_UNLOAD_TIME := 5.0
 # Visual pixels are batches of recoverable matter, not individual simulated atoms.
@@ -79,6 +89,9 @@ var deliveries := 0
 var to_field := true
 var miner_work_time := 0.0
 var miner_speed := 0.0
+var miner_velocity := Vector2.ZERO
+var miner_flight_clock := 0.0
+var miner_leg_number := 0
 var notice := ""
 var notice_time := 0.0
 
@@ -333,12 +346,27 @@ func tick_miner(delta: float) -> void:
 	var source := HULL_WORKSITE if salvage_mode else FIELD
 	var target := source if to_field else STOCKPILE
 	var distance := miner_position.distance_to(target)
-	if distance > 0.0:
-		var target_speed := minf(MINER_SPEED, sqrt(2 * MINER_ACCELERATION * distance))
-		miner_speed = move_toward(miner_speed, target_speed, MINER_ACCELERATION * delta)
-		miner_heading = miner_position.angle_to_point(target)
-		miner_position = miner_position.move_toward(target, miner_speed * delta)
+	if distance > 2.5:
+		miner_flight_clock += delta
+		miner_velocity = WorkerMotion.next_velocity(
+			miner_position, miner_velocity, target, delta,
+			miner_flight_clock, float(miner_leg_number) * 1.73 + 0.6,
+			MINER_SPEED, MINER_ACCELERATION
+		)
+		miner_speed = miner_velocity.length()
+		if miner_speed > 0.5:
+			miner_heading = lerp_angle(miner_heading, miner_velocity.angle(), clampf(delta * 4.0, 0.0, 1.0))
+		var movement := miner_velocity * delta
+		if movement.length() >= distance:
+			miner_position = target
+			miner_velocity = Vector2.ZERO
+			miner_speed = 0.0
+		else:
+			miner_position += movement
 		return
+	# Settle precisely on the dock. Extraction and unloading use this position.
+	miner_position = target
+	miner_velocity = Vector2.ZERO
 	miner_speed = 0.0
 	if to_field:
 		var remaining := HULL_RESERVE - hull_extracted if salvage_mode else FIELD_RESERVE - field_extracted
@@ -376,6 +404,8 @@ func tick_miner(delta: float) -> void:
 				report("First automated delivery · 3 ore at the wreck")
 		miner_cargo = 0
 	to_field = not to_field
+	miner_leg_number += 1
+	miner_flight_clock = 0.0
 
 func miner_status() -> String:
 	var source := HULL_WORKSITE if salvage_mode else FIELD
