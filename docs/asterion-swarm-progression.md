@@ -31,9 +31,9 @@ The controller alone charts the map initially. Ordinary workers travel through f
 - Drones approach the closest useful *surface* rather than the middle of a field. Remove actual material pixels from the local workface; the workface migrates inward, and a partially mined asteroid is revisited.
 - When cargo is full, return to an appropriate reachable stockpile, unload at a deliberate pace, and resume at the same productive asteroid or choose a new one. A source is finite.
 - Workers select jobs subject to generation-level settings, research, local material availability and network limitations. **The player should not micromanage individual worker routes**.
-- Starting coordination limit: **10 active workers per controller**, extended by a *Coordination Core* or *Swarm Control Node* family of upgrades (name not finalized). This is a capacity, not a requirement to fill it immediately.
+- Starting coordination limit: **10 active workers per controller**. This fixed cap applies throughout the early tutorial; being able to increase capacity is **not** part of the initial communications/range implementation. Do not unlock or introduce a Coordination Core in Pass 2. Much later, a distinct **Insight** will reveal the need for additional coordination/computing capacity and enable a *Coordination Core* (or potentially renamed *Swarm Control Node*) to raise the cap. The name and exact late-game trigger are not yet final.
 - Workers operate only within communications range of their controller or connected relays. Range extends through sensors/comms research and relay networks. When disconnected, workers should seek reconnection/return; an eventual autonomy upgrade might allow independent operation.
-- Research improves worker engine speed, cargo size, extraction efficiency, navigation, network range, and coordination capacity.
+- Early research may improve worker engine speed, cargo size, extraction efficiency, navigation and eventually network range. **Increasing coordination capacity is reserved for the later Coordination Core Insight**, not a generic early research upgrade.
 - Generation templates tune relative priorities such as mining, salvage, hauling, maintenance and repair. They guide decisions rather than impose rigid time quotas.
 - During certain discoveries and infrastructure moves, the system can temporarily prioritize available workers for a major operation without requiring the player to click each worker.
 - No full boids/flocking or 1,000-worker economy is implemented yet; the Pass 1 flight lab only tests movement/rendering.
@@ -97,10 +97,10 @@ Eventually recover the other **four founding controllers** and outfit them with 
 
 ## Build priorities and guardrails
 
-- **Next gameplay update:** site-specific asteroid selection and local erosion; autonomous first miner; basic operating range/cap; first five deliveries triggering the Salvage Insight. Preserve flight handling and mining pace.
+- **Next gameplay update:** site-specific asteroid selection and local erosion; autonomous first miner; **enforce a fixed cap of 10 workers and basic operational range, with no capacity upgrades or Coordination Core**; first five deliveries triggering the Salvage Insight. Preserve flight handling and mining pace.
 - **Then:** physical salvage of Asterion, additional repairable workers, recovering and placing the refinery, stockpile siting.
 - **Then:** general-purpose hauling, refining, autofactory recovery, part recipes and first newly manufactured worker.
-- Later: true multi-worker swarm behaviour, capacity upgrades, more structures, planetary-scale resource abstraction and faction evolution.
+- Later: true multi-worker swarm behaviour, more structures, and a **separate future Coordination Core Insight** that unlocks capacity upgrades once progression warrants it; planetary-scale resource abstraction and faction evolution.
 - No immediate rewrite to microscopic atom simulation. Keep visual pixels and resource units consistent.
 - Maintain and extend Godot 4.7.2 compile, scene-boot and progression tests before shipping code.
 
