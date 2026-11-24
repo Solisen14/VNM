@@ -1,6 +1,6 @@
 # VNM — Asterion salvage, swarm autonomy and industrial progression
 
-Status: **Design notes / agreed direction and proposed balancing figures, not implemented features.**
+Status: **Living design specification. Pass 2 autonomous surface mining, Fe/Cu/Si inventory and initial range/cap implemented; later Insights, salvage, factories and drone replication remain designs, not implemented gameplay.**
 Recorded 2026-11-24. Preserve the current playable tutorial, the measured pace of HAL and Miner 031, and the pixel-disassembly prototype. Do not treat this file as a request to change code.
 
 ## Core fantasy and world scale
@@ -22,7 +22,7 @@ The controller alone charts the map initially. Ordinary workers travel through f
 7. Miner 031 starts mining automatically, no individual work order. Its first delivery and subsequent deliveries demonstrate an autonomous loop.
 8. Subsequent Insights expand from this loop rather than replacing it.
 
-**Current code caveat:** the prototype still has a manual right-click assignment step and a centre-field mining target. The desired design removes both. Future work must preserve the tutorial's teaching purpose while implementing those changes.
+**Pass 2 status:** Miner 031 now autonomously selects an asteroid surface when repaired, and right-click mining assignments have been removed. The source's pixel-by-pixel workface and material deliveries are implemented; later autonomous fleets and complex job scheduling remain to be built.
 
 ## Worker autonomy and limits
 
@@ -97,8 +97,8 @@ Eventually recover the other **four founding controllers** and outfit them with 
 
 ## Build priorities and guardrails
 
-- **Next gameplay update:** site-specific asteroid selection and local erosion; autonomous first miner; **enforce a fixed cap of 10 workers and basic operational range, with no capacity upgrades or Coordination Core**; first five deliveries triggering the Salvage Insight. Preserve flight handling and mining pace.
-- **Then:** physical salvage of Asterion, additional repairable workers, recovering and placing the refinery, stockpile siting.
+- **Pass 2 implemented:** site-specific asteroid selection and local erosion; autonomous first miner; 65/25/10 Fe/Cu/Si field and hover/zoom HUD; a fixed cap of 10 workers and basic communications range, **with no Coordination Cores or early capacity upgrades**. Five deliveries now set the Salvage-ready flag, but do not unlock salvage yet. Approved flight handling and mining pace remain.
+- **Next (Pass 3):** turn the five-delivery threshold into the Salvage Insight; physically cut the Asterion hull and expose subsystems; reveal three more repairable drones. Subsequent work recovers/places the refinery, prompts stockpile siting and adds the two further repairable drones.
 - **Then:** general-purpose hauling, refining, autofactory recovery, part recipes and first newly manufactured worker.
 - Later: true multi-worker swarm behaviour, more structures, and a **separate future Coordination Core Insight** that unlocks capacity upgrades once progression warrants it; planetary-scale resource abstraction and faction evolution.
 - No immediate rewrite to microscopic atom simulation. Keep visual pixels and resource units consistent.
