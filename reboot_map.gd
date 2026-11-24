@@ -312,7 +312,7 @@ func draw_contact(state: State, contact: String) -> void:
 		draw_worker_light(state.position_of(contact), -0.52, false)
 	elif contact == "miner" and on_screen and state.phase < State.Phase.ORDERS:
 		draw_worker_light(state.miner_position, -0.25, false)
-	var highlight := contact == game.selected or contact == hover
+	var highlight: bool = contact == game.selected or contact == hover
 	if contact != "miner" or state.phase < State.Phase.ORDERS or highlight:
 		reticle(point, tint, 12 if highlight else 8)
 	if contact == "miner" and state.phase >= State.Phase.ORDERS and not highlight:
