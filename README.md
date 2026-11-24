@@ -26,6 +26,8 @@ This update **preserves the existing reboot and Field Repair tutorial**. Only th
 - **Camera:** Scroll or Q/E can now zoom from 0.18× to 8×. A metre scale bar sits in the lower-right of the map. **Frame signals** continues to show the broader tutorial area.
 - **Separate flight lab:** In Godot, open `swarm_lab.tscn` and press **F6** to preview **1, 10, 100 or 1,000** luminous workers moving using exactly the same motion helper (`worker_motion.gd`). This scene tests rendering and steering only; it is not part of the tutorial's production economy and does not chart terrain.
 
+For a repeatable **headless logic regression** in a local Godot 4 installation, run `godot --headless --path . --script res://tests/pass1_smoke.gd`. It checks the first Insight, Field Repair resource consumption, the first haul, hull salvage accounting, player-only map charting, and worker steering arrival.
+
 This is **Pass 1**, not full flocking. Neighbour separation/cohesion, site-specific cutting positions, and large-scale worker aggregation belong to later passes. The player ship still uses its original procedural silhouette at the corrected physical scale; its modular sprite system is planned for Pass 3.
 
 ## Destructible matter / Asterion excavation experiment
