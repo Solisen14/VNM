@@ -15,6 +15,7 @@ var hover := ""
 var field_image: Image
 var field_texture: ImageTexture
 var field_cells: Array[Vector2i] = []
+var field_original_colors: Array[Color] = []
 var field_erased := 0
 var wreck_image: Image
 var wreck_texture: ImageTexture
@@ -188,6 +189,9 @@ func build_ore_pixels() -> void:
 	field_cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 		return Vector2(a).distance_squared_to(Vector2(80, 62)) < Vector2(b).distance_squared_to(Vector2(80, 62))
 	)
+	field_original_colors.clear()
+	for p in field_cells:
+		field_original_colors.append(field_image.get_pixel(p.x, p.y))
 	field_texture = ImageTexture.create_from_image(field_image)
 	field_erased = 0
 
@@ -221,11 +225,16 @@ func build_wreck_pixels() -> void:
 func sync_matter_visuals(state: State) -> void:
 	if field_texture != null:
 		var field_target := clampi(floori(float(field_cells.size()) * state.field_cut_fraction()), 0, field_cells.size())
-		if field_target > field_erased:
+		if field_target != field_erased:
 			while field_erased < field_target:
 				var p := field_cells[field_erased]
 				field_image.set_pixel(p.x, p.y, Color.TRANSPARENT)
 				field_erased += 1
+			# A cancelled manual extraction has not transferred matter yet.
+			while field_erased > field_target:
+				field_erased -= 1
+				var p := field_cells[field_erased]
+				field_image.set_pixel(p.x, p.y, field_original_colors[field_erased])
 			field_texture.update(field_image)
 	if wreck_texture != null:
 		var wreck_target := clampi(floori(float(wreck_cells.size()) * state.hull_cut_fraction()), 0, wreck_cells.size())
