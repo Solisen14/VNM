@@ -13,13 +13,13 @@ func _initialize() -> void:
 		var center := OreField.rock_center(i)
 		assert(surface.distance_to(center) > OreField.rock_radius(i), "Worker assigned inside an asteroid")
 		assert((surface - center).dot(State.STOCKPILE - center) > 0.0, "Worksite not stockpile-facing")
-	assert(total_capacity == 100, "Asteroid sizes do not sum to 100")
-	assert(OreField.FE_UNITS == 65 and OreField.CU_UNITS == 25 and OreField.SI_UNITS == 10, "Field mineral design changed")
+	assert(total_capacity == 137, "Asteroid sizes do not sum to 137")
+	assert(OreField.FE_UNITS == 89 and OreField.CU_UNITS == 34 and OreField.SI_UNITS == 14, "Field mineral design changed")
 	for i in range(OreField.ROCK_COUNT):
 		var result: Dictionary = state.extract_rock(i, OreField.rock_capacity(i))
 		assert(int(result["Fe"]) + int(result["Cu"]) + int(result["Si"]) == OreField.rock_capacity(i))
-	assert(state.field_extracted == 100, "Field accounting drift")
-	assert(state.field_fe_extracted == 65 and state.field_cu_extracted == 25 and state.field_si_extracted == 10,
+	assert(state.field_extracted == 137, "Field accounting drift")
+	assert(state.field_fe_extracted == 89 and state.field_cu_extracted == 34 and state.field_si_extracted == 14,
 		"Extraction failed to conserve the specified composition")
 	assert(state.field_remaining_material() == {"Fe": 0, "Cu": 0, "Si": 0}, "Depleted field contains phantom material")
 	assert(OreField.nearest_viable_rock(State.STOCKPILE, Vector2.ZERO, State.COMMS_RANGE,
@@ -63,6 +63,7 @@ func _initialize() -> void:
 		game.tick_miner(State.MINER_UNLOAD_TIME + 0.01)
 		assert(game.miner_cargo == 0, "Unload failed")
 	assert(game.deliveries == 5 and game.salvage_insight_ready, "Five-delivery threshold missed")
+	assert(not game.salvage_insight_unlocked, "Salvage should need a second Insight confirmation")
 	assert(not game.salvage_mode and game.command_for("wreck").is_empty(), "Salvage activated early")
 	assert(game.stock_ore == game.stock_fe + game.stock_cu + game.stock_si, "Stockpile mineral conservation failed")
 	assert(game.field_extracted == game.stock_ore + 3, "Field material was lost or duplicated")
@@ -96,5 +97,5 @@ func _initialize() -> void:
 	assert(total_elapsed > 5.0 * (State.MINER_EXTRACTION_TIME + State.MINER_UNLOAD_TIME),
 		"Mining timings unexpectedly accelerated")
 
-	print("PASS: VNM Pass 2 autonomy, physical asteroid sites, 65/25/10 chemistry, range and cap")
+	print("PASS: VNM Pass 2 autonomy, physical asteroid sites, 89/34/14 chemistry, range and cap")
 	quit(0)
