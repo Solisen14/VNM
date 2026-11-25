@@ -464,7 +464,7 @@ func execute(contact: String, action: String) -> void:
 				set_phase(Phase.FIELD_REPAIR)
 				report("Insight recorded · Field Repair")
 		"Extract ore sample":
-			var amount := mini(3, mini(drill_loads, HOLD - controller_load()))
+			var amount := mini(3, HOLD - controller_load())
 			if manual_rock < 0 or rock_remaining(manual_rock) <= 0:
 				manual_rock = OreField.rock_for_manual_sample(player, asteroid_mined)
 			if manual_rock < 0:
@@ -472,7 +472,6 @@ func execute(contact: String, action: String) -> void:
 			amount = mini(amount, rock_remaining(manual_rock))
 			if amount <= 0:
 				return
-			drill_loads -= amount
 			ore += amount
 			var raw := extract_rock(manual_rock, amount)
 			cargo_fe += int(raw["Fe"])
@@ -681,7 +680,7 @@ func hull_cut_fraction() -> float:
 			SALVAGE_SITES[int(worker["index"])]
 		) <= 2.5:
 			progress += float(MINER_LOAD_SIZE) * clampf(float(worker["time"]) / HULL_CUT_TIME, 0.0, 1.0)
-	return clampf(progress / float(HULL_RESERVE), 0.0, 1.0)
+	return clampf(progress / float(REFINERY_EXPOSURE), 0.0, 1.0)
 
 func tick_salvage_workers(delta: float) -> void:
 	for i in range(salvage_workers.size()):
