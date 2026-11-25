@@ -37,6 +37,42 @@ func reset_view() -> void:
 	build_ore_pixels()
 	build_wreck_pixels()
 
+# Edge-scroll is confined to the actual map viewport, never the sidebar.
+# Moving the cursor to the outer 36 pixels gently disengages HAL follow.
+const EDGE_PAN_MARGIN := 36.0
+const EDGE_PAN_SCREEN_SPEED := 560.0
+
+func pan_from_edge(pointer: Vector2, delta: float) -> void:
+	if size.x < EDGE_PAN_MARGIN * 3.0 or size.y < EDGE_PAN_MARGIN * 3.0:
+		return
+	if pointer.x < 0.0 or pointer.y < 0.0 or pointer.x > size.x or pointer.y > size.y:
+		return
+	var movement := Vector2.ZERO
+	if pointer.x < EDGE_PAN_MARGIN:
+		movement.x = -(EDGE_PAN_MARGIN - pointer.x) / EDGE_PAN_MARGIN
+	elif pointer.x > size.x - EDGE_PAN_MARGIN:
+		movement.x = (pointer.x - (size.x - EDGE_PAN_MARGIN)) / EDGE_PAN_MARGIN
+	if pointer.y < EDGE_PAN_MARGIN:
+		movement.y = -(EDGE_PAN_MARGIN - pointer.y) / EDGE_PAN_MARGIN
+	elif pointer.y > size.y - EDGE_PAN_MARGIN:
+		movement.y = (pointer.y - (size.y - EDGE_PAN_MARGIN)) / EDGE_PAN_MARGIN
+	if movement.length_squared() <= 0.0001:
+		return
+	following = false
+	var magnitude := minf(1.0, movement.length())
+	var displacement := movement.normalized() * (EDGE_PAN_SCREEN_SPEED * magnitude / zoom) * delta
+	camera = (camera + displacement).clamp(State.WORLD.position, State.WORLD.end)
+
+func _process(delta: float) -> void:
+	super._process(delta)
+	if not is_instance_valid(game) or not is_visible_in_tree():
+		return
+	if game.state.phase < State.Phase.WAYFINDING or game.insight_popup.visible or dragging:
+		return
+	if get_viewport().gui_get_hovered_control() != self:
+		return
+	pan_from_edge(get_local_mouse_position(), delta)
+
 func set_zoom(factor: float, anchor: Vector2) -> void:
 	if game.state.phase < State.Phase.SENSORS:
 		return
@@ -182,9 +218,10 @@ func draw_refinery_intake() -> void:
 	draw_line(pad + Vector2(0, -10) * zoom, pad + Vector2(0, 10) * zoom, Color("#b3d8cb"), 2.0, true)
 	draw_rect(Rect2(mouth - Vector2(22, 11) * zoom, Vector2(44, 22) * zoom), Color("#344d4c"))
 	draw_rect(Rect2(mouth - Vector2(22, 11) * zoom, Vector2(44, 22) * zoom), Color("#a4c1aa"), false, maxf(1.0, zoom))
-	if zoom > 0.65:
-		write(pad + Vector2(-37, -24), "STAGING PAD", Color("#a9c8b9"), 11)
-		write(mouth + Vector2(-30, -17), "INTAKE", Color("#b6c7ad"), 11)
+	# The port's function is unknown until the Salvage Insight.
+	if zoom > 1.1:
+		var port_label := "REFINERY INTAKE" if game.state.salvage_insight_unlocked else "SEALED TRANSFER PORT"
+		write(mouth + Vector2(-48, -17), port_label, Color("#b6c7ad"), 11)
 
 func draw_salvage_access_zone(state: State) -> void:
 	if not state.salvage_insight_unlocked:
