@@ -781,7 +781,7 @@ func tick_miner(delta: float) -> void:
 				report("First automated ore delivery · %d units at the Collection Point" % miner_cargo)
 			elif deliveries >= 5 and not salvage_insight_ready:
 				salvage_insight_ready = true
-				report("Why is ore collecting here? · Asterion intake identified")
+				report("Why does the Collection Point connect to a sealed transfer port?")
 		miner_cargo = 0
 		miner_fe = 0
 		miner_cu = 0
