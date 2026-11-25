@@ -139,7 +139,7 @@ func _draw() -> void:
 		draw_dashed_line(screen_point(state.player), end, Color(CYAN, 0.52), 1.2, 7.0)
 		reticle(end, CYAN, 10)
 	if state.phase == State.Phase.HAULING and (state.miner_rock >= 0 or state.miner_hull_site >= 0):
-		var source := State.SALVAGE_SITES[state.miner_hull_site] if state.salvage_mode and state.miner_hull_site >= 0 else state.miner_worksite
+		var source: Vector2 = State.SALVAGE_SITES[state.miner_hull_site] if state.salvage_mode and state.miner_hull_site >= 0 else state.miner_worksite
 		draw_route_hint(screen_point(source), screen_point(State.STOCKPILE))
 	if state.phase >= State.Phase.ORDERS:
 		if state.is_charted(state.miner_position):
