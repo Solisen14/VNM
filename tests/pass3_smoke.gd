@@ -78,6 +78,9 @@ func _initialize() -> void:
 			break
 	assert(game.refinery_exposed, "12 units of hull salvage failed to expose refinery")
 	assert(game.hull_extracted == State.REFINERY_EXPOSURE, "Cutting overshot the protected refinery")
+	for site in range(State.SALVAGE_SITES.size()):
+		assert(game.hull_site_units[site] == State.SALVAGE_SITE_QUOTA,
+			"Salvager cuts did not physically expose each hull zone")
 	assert(game.hull_stock == game.hull_extracted, "Hull feedstock vanished while hauling")
 	assert(game.salvage_deliveries >= 4, "Salvage workers were not transporting cargo")
 	assert(game.chart.size() == charted_before, "Salvagers are not supposed to chart space")
