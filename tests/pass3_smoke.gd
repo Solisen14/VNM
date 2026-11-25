@@ -61,7 +61,7 @@ func _initialize() -> void:
 		game.execute("stockpile", "Collect repair supplies")
 		assert(game.repair_kits == 1, "HAL did not load one repair supply package")
 		var contact: String = State.SALVAGE_CONTACTS[i]
-		assert(game.command_for(contact) == "Repair salvage drone", "Repair command unavailable")
+		assert(game.command_for(contact) == "Repair worker", "Repair command unavailable")
 		game.execute(contact, "Repair salvage drone")
 		assert(game.salvage_worker_active(contact), "Salvager did not boot")
 		assert(game.repair_kits == 0, "Repair supplies were not consumed")
@@ -89,5 +89,5 @@ func _initialize() -> void:
 	assert(game.hull_extracted == State.REFINERY_EXPOSURE, "Salvagers damaged exposed machinery")
 	assert(game.active_drones == 4 and game.active_drones < State.DRONE_CAPACITY,
 		"Initial 10-drone limit changed")
-	print("PASS: VNM Pass 3 manual mining, intake cache, Insight, 3 salvage workers and protected refinery")
+	print("PASS: VNM Pass 3 manual mining, collection point, Insight, 3 general workers and protected refinery")
 	quit(0)

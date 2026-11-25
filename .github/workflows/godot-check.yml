@@ -37,3 +37,5 @@ jobs:
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass3_smoke.gd
       - name: Verify paused Salvage popup and HUD progression
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass3_ui_smoke.gd
+      - name: Shared autonomous worker decisions and HAL salvage access
+        run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/autonomous_worker_smoke.gd

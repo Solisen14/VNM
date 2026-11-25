@@ -16,8 +16,8 @@ const PHASE_PROMPTS := [
 	"Calling the Asterion and the mining fleet. Awaiting reply…",
 	"Investigate the three signals. Right-click each contact to approach and scan.",
 	"Gather ore and recover two spare parts. Return to the damaged miner to repair it.",
-	"Miner 031 has rebooted and is selecting a mining worksite.",
-	"Miner 031 works autonomously. Watch its chosen asteroid recede from the surface as it carries ore home."
+	"Miner 031 has rebooted. You can keep extracting ore and deliver it to the Collection Point.",
+	"Miner 031 works autonomously. Right-click the Depleted Ore Field to mine, then right-click the Collection Point to unload."
 ]
 
 var state := State.new()
@@ -191,7 +191,7 @@ func _physics_process(delta: float) -> void:
 	if state.salvage_insight_ready and not state.salvage_insight_unlocked and not insight_popup.visible:
 		insight_popup_title.text = "SECOND INSIGHT  /  SALVAGE"
 		insight_headline.text = "Why is the ore stockpiling here?"
-		insight_description.text = "The Asterion's intake is still receiving ore, but its refinery is buried beneath the hull. I can salvage the mothership. Three repairable worker signals are nearby."
+		insight_description.text = "The intake leads to a buried refinery. I can authorize salvage of its access plating, not the rest of the ship. Three damaged workers are nearby; once repaired, they will choose mining or salvage autonomously."
 		insight_open_button.text = "Uncover Salvage Insight [I]"
 		insight_popup.show()
 		insight_open_button.grab_focus()
@@ -260,14 +260,35 @@ func refresh() -> void:
 		"UNRESOLVED SIGNALS", "FIELD REPAIR", "MINER 031 ONLINE", "AUTONOMOUS MINING"]
 	phase_heading.text = stages[phase]
 	prompt.text = PHASE_PROMPTS[phase]
-	if state.deliveries > 0 and not state.salvage_insight_ready:
-		prompt.text = "Ore delivery %d complete. Miner 031 is selecting its next autonomous trip." % state.deliveries
+	if phase >= State.Phase.HAULING and not state.salvage_insight_ready:
+		if state.ore > 0:
+			prompt.text = "HAL is carrying %d raw ore. Right-click the Collection Point to deposit it. You can mine alongside Miner 031 while it works." % state.ore
+		else:
+			prompt.text = "Help Miner 031: right-click the Depleted Ore Field to mine raw ore, then right-click the Collection Point to unload it. Drone deliveries: %d/5." % state.deliveries
 	if state.salvage_insight_ready and not state.salvage_insight_unlocked:
-		prompt.text = "Five deliveries confirmed at the Asterion's former ore intake. A new Insight is available."
+		prompt.text = "Five deliveries at the Collection Point. Why is this old transfer port collecting ore? A new Insight is available."
 	if state.salvage_insight_unlocked:
-		prompt.text = "Three dormant salvagers detected. Right-click the intake cache to collect repair supplies (2 Fe + 1 Cu), then visit each damaged worker."
-	if state.refinery_exposed:
-		prompt.text = "Damaged refinery uncovered beneath the hull. The salvagers have paused to protect it. Recovering and relocating it comes next."
+		var missing_workers := 0
+		for worker in state.salvage_workers:
+			if not bool(worker["active"]):
+				missing_workers += 1
+		if missing_workers > 0:
+			if state.repair_kits > 0:
+				prompt.text = "Repair supplies aboard! Right-click any damaged worker (042–044) to fly over and restore it."
+			elif state.ore > 0 or state.hull_cargo > 0:
+				prompt.text = "To repair damaged workers, first unload HAL's cargo at the Collection Point. Then collect repair supplies (2 Fe + 1 Cu) and visit a worker."
+			elif state.controller_load() + 3 > State.HOLD:
+				prompt.text = "Free three cargo spaces before collecting repair supplies at the Collection Point. Each repair needs 2 Fe + 1 Cu."
+			elif state.stock_fe >= 2 and state.stock_cu >= 1:
+				prompt.text = "Repair damaged workers: right-click the Collection Point to collect 2 Fe + 1 Cu, then right-click a damaged worker to repair it."
+			else:
+				prompt.text = "The Collection Point needs 2 Fe and 1 Cu per repair. Mine more ore and deposit it to restore the remaining workers."
+		else:
+			prompt.text = "All three workers are restored. They independently choose mining or the authorized refinery salvage task."
+		if not state.refinery_exposed:
+			prompt.text += " You can also right-click the highlighted hull section to salvage."
+		else:
+			prompt.text += " Refinery exposed; the rest of the mothership remains protected."
 	var controls := "Scroll / Q and E to zoom"
 	if phase >= State.Phase.FLIGHT:
 		controls += "   ·   A/D turn   ·   W/S thrust"
@@ -275,6 +296,8 @@ func refresh() -> void:
 		controls += "   ·   Left-click to fly"
 	if phase >= State.Phase.CONTACTS:
 		controls += "   ·   Right-click contacts"
+	if phase >= State.Phase.WAYFINDING:
+		controls += "   ·   Edge-scroll / middle-drag to pan"
 	footer.text = controls
 	contact_details.visible = phase >= State.Phase.CONTACTS
 	contact_details.text = "CONTACTS IDENTIFIED   %d / 3" % state.scanned.size()
@@ -283,21 +306,25 @@ func refresh() -> void:
 		var available := state.command_for(selected)
 		if not available.is_empty():
 			contact_details.text += "\nRight-click · %s" % available
+		else:
+			var guidance := state.interaction_hint(selected)
+			if not guidance.is_empty():
+				contact_details.text += "\n" + guidance
 	work_panel.visible = not state.work_action.is_empty()
 	if work_panel.visible:
 		var progress := state.work_fraction() * 100.0
 		work_caption.text = "%s   %d%%" % [State.WORK_LABELS[state.work_action], mini(99, floori(progress))]
 		work_progress.value = progress
 	cargo.visible = phase >= State.Phase.FIELD_REPAIR
-	cargo.text = "CONTROLLER CARGO   %d / %d\nRaw ore ×%d   ·   Spare parts ×%d\nRepair supplies ×%d" % [
-		state.controller_load(), State.HOLD, state.ore, state.parts, state.repair_kits
+	cargo.text = "CONTROLLER CARGO   %d / %d\nRaw ore ×%d   ·   Hull ×%d\nSpare parts ×%d   ·   Repair supplies ×%d" % [
+		state.controller_load(), State.HOLD, state.ore, state.hull_cargo, state.parts, state.repair_kits
 	]
 	if phase >= State.Phase.HAULING:
 		var unmined: Dictionary = state.field_remaining_material()
 		cargo.text += "\n\nORE FIELD 01   RAW MATTER\nFe %d  ·  Cu %d  ·  Si %d remaining" % [
 			int(unmined["Fe"]), int(unmined["Cu"]), int(unmined["Si"])
 		]
-		cargo.text += "\n\nASTERION INTAKE CACHE  (%d units)\nFe %d  ·  Cu %d  ·  Si %d\nOre runs %d  ·  Miner cargo %d" % [
+		cargo.text += "\n\nCOLLECTION POINT  (%d raw units)\nFe %d  ·  Cu %d  ·  Si %d\nOre runs %d  ·  Miner cargo %d" % [
 			state.stock_ore, state.stock_fe, state.stock_cu, state.stock_si,
 			state.deliveries, state.miner_cargo
 		]
@@ -310,7 +337,7 @@ func refresh() -> void:
 			for worker in state.salvage_workers:
 				if bool(worker["active"]):
 					restored += 1
-			cargo.text += "\n\nASTERION SALVAGE\nWorkers %d / 3  ·  Hull %d / %d\nFeedstock delivered ×%d" % [
+			cargo.text += "\n\nREFINERY ACCESS SECTOR\nRestored workers %d / 3\nHull removed %d / %d  ·  Stored ×%d\nGEN 01  Mining 50%% / Salvage 50%%" % [
 				restored, state.hull_extracted, State.REFINERY_EXPOSURE, state.hull_stock
 			]
 	notice.text = state.notice if state.notice_time > 0 else ""
@@ -322,11 +349,11 @@ func refresh() -> void:
 		research_status.text = "Field Repair complete · Miner 031 online.\nSalvage threshold: %d / 5 deliveries." % mini(5, state.deliveries)
 		if state.salvage_insight_unlocked:
 			research_title.text = "◆ Field Repair ✓   ◆ Salvage ✓"
-			research_status.text = "Salvage unlocked. Three repairable workers detected.\nRecovered hull material: %d / %d units." % [
+			research_status.text = "Only refinery-access plating is authorized.\nHAL can salvage; restored workers choose mining or salvage (50/50).\nHull removed: %d / %d units." % [
 				state.hull_extracted, State.REFINERY_EXPOSURE
 			]
 			if state.refinery_exposed:
-				research_status.text += "\nRefinery exposed; structural recovery follows in Pass 4."
+				research_status.text += "\nRefinery exposed. Other mothership systems remain locked."
 
 func refresh_boot() -> void:
 	var waiting := state.phase == State.Phase.SAFE_MODE
