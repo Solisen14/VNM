@@ -26,6 +26,6 @@ func verify_insight() -> void:
 	assert(game.state.is_visible("salvage_1") and game.state.is_visible("salvage_3"),
 		"New repairable workers not pinged")
 	game.refresh()
-	assert(game.research_status.text.contains("Salvage unlocked"), "Insight tree didn't advance")
+	assert(game.research_status.text.contains("refinery-access plating"), "Insight tree didn't advance")
 	print("PASS: VNM Pass 3 paused Insight HUD and three new worker signals")
 	quit(0)
