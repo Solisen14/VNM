@@ -500,8 +500,16 @@ func command_for(contact: String) -> String:
 		"stockpile":
 			if ore > 0:
 				return "Unload raw ore"
+			if hull_cargo > 0:
+				return "Unload hull feedstock"
 			if can_collect_repair_supplies():
 				return "Collect repair supplies"
+		"wreck":
+			# The only salvageable area in this Insight is the small refinery
+			# access sector. No generic salvage permission for the mothership.
+			if salvage_insight_unlocked and not refinery_exposed and controller_load() < HOLD:
+				if closest_open_salvage_site(player) >= 0:
+					return "Salvage refinery access plating"
 	var index := salvage_index(contact)
 	if index >= 0 and salvage_insight_unlocked and not bool(salvage_workers[index]["active"]):
 		if repair_kits > 0 and has_worker_capacity():
@@ -602,7 +610,7 @@ func execute(contact: String, action: String) -> void:
 			parts -= PARTS_REQUIRED
 			active_drones += 1
 			set_phase(Phase.HAULING)
-			choose_mining_site()
+			assign_miner_task()
 			report("Field Repair complete · Miner 031 autonomously mining")
 		"Unload raw ore":
 			stock_ore += ore
@@ -614,6 +622,18 @@ func execute(contact: String, action: String) -> void:
 			cargo_fe = 0
 			cargo_cu = 0
 			cargo_si = 0
+		"Unload hull feedstock":
+			hull_stock += hull_cargo
+			report("HAL unloaded %d hull units at the intake cache" % hull_cargo)
+			hull_cargo = 0
+		"Salvage refinery access plating":
+			if manual_hull_site < 0:
+				return
+			var cut := extract_hull(manual_hull_site, mini(3, HOLD - controller_load()))
+			hull_cargo += cut
+			if cut > 0 and not refinery_exposed:
+				report("HAL recovered %d refinery-access hull units" % cut)
+			manual_hull_site = -1
 		"Collect repair supplies":
 			stock_ore -= 3
 			stock_fe -= 2
@@ -629,7 +649,8 @@ func execute(contact: String, action: String) -> void:
 			spent_cu += 1
 			active_drones += 1
 			salvage_workers[index]["active"] = true
-			report("%s restored · Autonomous hull salvage online" % contact_name(contact))
+			assign_worker_task(salvage_workers[index], 42 + index)
+			report("%s restored · Autonomous worker online" % contact_name(contact))
 
 func contact_name(contact: String) -> String:
 	match contact:
@@ -644,7 +665,7 @@ func contact_name(contact: String) -> String:
 		"stockpile": return "Asterion intake cache"
 	var index := salvage_index(contact)
 	if index >= 0:
-		return "Salvager %03d" % [42 + index] if bool(salvage_workers[index]["active"]) else "Damaged salvager %03d" % [42 + index]
+		return "Worker %03d" % [42 + index] if bool(salvage_workers[index]["active"]) else "Damaged worker %03d" % [42 + index]
 	return "No contact selected"
 
 func tick_miner(delta: float) -> void:
