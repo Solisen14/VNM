@@ -27,8 +27,12 @@ const MINER_EXTRACTION_TIME := 8.0
 const MINER_UNLOAD_TIME := 5.0
 # Visual pixels are batches of recoverable matter, not individual simulated atoms.
 const FIELD_RESERVE := OreField.TOTAL_UNITS
-const HULL_RESERVE := 48
+# Only the refinery-access hull sector is authorized by the Salvage Insight.
+# Other parts of Asterion stay intact until their own future Insights.
 const REFINERY_EXPOSURE := 12
+const HULL_RESERVE := REFINERY_EXPOSURE
+const WORKER_MINING_WEIGHT := 0.50
+const WORKER_SALVAGE_WEIGHT := 0.50
 const SALVAGE_SITE_QUOTA := 4
 const SALVAGE_CONTACTS := ["salvage_1", "salvage_2", "salvage_3"]
 const SALVAGE_SPAWNS := [Vector2(1040, 560), Vector2(1225, 565), Vector2(1350, 430)]
@@ -47,6 +51,8 @@ const WORK_TIMES := {
 	"Unload raw ore": 3.5,
 	"Collect repair supplies": 4.0,
 	"Repair salvage drone": 7.0,
+	"Salvage refinery access plating": 12.0,
+	"Unload hull feedstock": 3.5,
 }
 const WORK_LABELS := {
 	"Approach and scan": "Scanning contact",
@@ -55,7 +61,9 @@ const WORK_LABELS := {
 	"Repair mining drone": "Repairing miner",
 	"Unload raw ore": "Unloading raw ore",
 	"Collect repair supplies": "Collecting repair supplies",
-	"Repair salvage drone": "Restoring salvage worker",
+	"Repair salvage drone": "Restoring worker",
+	"Salvage refinery access plating": "Cutting authorized hull sector",
+	"Unload hull feedstock": "Unloading recovered hull",
 }
 const WORLD := Rect2(-2200, -1550, 4700, 3450)
 const FIELD := Vector2(530, -215)
@@ -87,12 +95,16 @@ var scanned := {}
 var salvaged := {}
 var ore := 0
 var parts := 0
+var hull_cargo := 0
 var drill_loads := 6
 var field_extracted := 0
 var hull_extracted := 0
 var hull_stock := 0
 var salvage_deliveries := 0
+# Miner 031 also follows the shared generation's mining/salvage priorities.
 var salvage_mode := false
+var miner_hull_site := -1
+var miner_assignments := 0
 var miner_cargo_type := "ore"
 var refinery_exposed := false
 var zoomed_in := false
@@ -140,6 +152,7 @@ var spent_si := 0
 var repair_kits := 0
 var manual_rock := -1
 var manual_worksite := Vector2.ZERO
+var manual_hull_site := -1
 var salvage_insight_unlocked := false
 var salvage_workers: Array[Dictionary] = []
 var hull_site_units := PackedInt32Array([0, 0, 0])
@@ -158,6 +171,14 @@ func _init() -> void:
 			"index": i,
 			"site_index": i,
 			"to_hull": true,
+			"task": "idle",
+			"rock": -1,
+			"worksite": Vector2.ZERO,
+			"cargo_kind": "ore",
+			"cargo_fe": 0,
+			"cargo_cu": 0,
+			"cargo_si": 0,
+			"assignments": i + 1,
 			"time": 0.0,
 			"cargo": 0,
 			"linked": true
@@ -177,7 +198,7 @@ func unlock_salvage() -> void:
 	report("SALVAGE UNLOCKED · Three dormant workers detected near the hull")
 
 func controller_load() -> int:
-	return ore + parts + repair_kits * 3
+	return ore + hull_cargo + parts + repair_kits * 3
 
 func can_collect_repair_supplies() -> bool:
 	return salvage_insight_unlocked and has_worker_capacity() and repair_kits == 0 and controller_load() + 3 <= HOLD and stock_fe >= 2 and stock_cu >= 1
@@ -193,6 +214,8 @@ func manual_ore_destination() -> Vector2:
 func action_position(contact: String, action: String) -> Vector2:
 	if contact == "ore" and action == "Extract ore sample" and manual_rock >= 0:
 		return manual_worksite
+	if contact == "wreck" and action == "Salvage refinery access plating" and manual_hull_site >= 0:
+		return SALVAGE_SITES[manual_hull_site]
 	return position_of(contact)
 
 func has_worker_capacity() -> bool:
@@ -203,11 +226,84 @@ func link_status() -> String:
 		return "STANDBY"
 	if miner_position.distance_to(player) > COMMS_RANGE:
 		return "RECONNECTING"
-	if to_field and miner_worksite.distance_to(player) > COMMS_RANGE:
+	var current_worksite := SALVAGE_SITES[miner_hull_site] if salvage_mode and miner_hull_site >= 0 else miner_worksite
+	if to_field and current_worksite.distance_to(player) > COMMS_RANGE:
 		return "WORKSITE OUT OF RANGE"
 	if STOCKPILE.distance_to(player) > COMMS_RANGE:
 		return "STOCKPILE OUT OF RANGE"
 	return "CONNECTED"
+
+# Shared 50/50 generation priorities. Before the Insight, only mining is
+# eligible. The worker picks its next task at the completion of a delivery.
+func pick_autonomous_task(identity: int, assignment: int, origin: Vector2) -> String:
+	var rock := OreField.nearest_viable_rock(
+		STOCKPILE, player, COMMS_RANGE, asteroid_mined, assignment
+	)
+	var mining_possible := rock >= 0
+	var salvage_possible := closest_open_salvage_site(origin) >= 0
+	if not mining_possible and not salvage_possible:
+		return "idle"
+	if not salvage_possible:
+		return "ore"
+	if not mining_possible:
+		return "hull"
+	var entropy := sin(float(identity) * 78.233 + float(assignment) * 12.9898) * 43758.5453
+	var roll := fposmod(entropy, 1.0)
+	return "ore" if roll < WORKER_MINING_WEIGHT / (WORKER_MINING_WEIGHT + WORKER_SALVAGE_WEIGHT) else "hull"
+
+func closest_open_salvage_site(origin: Vector2) -> int:
+	if not salvage_insight_unlocked or refinery_exposed or hull_extracted >= REFINERY_EXPOSURE:
+		return -1
+	var site := -1
+	var nearest := INF
+	for i in range(SALVAGE_SITES.size()):
+		if hull_site_units[i] >= SALVAGE_SITE_QUOTA:
+			continue
+		if SALVAGE_SITES[i].distance_to(player) > COMMS_RANGE:
+			continue
+		var distance := origin.distance_squared_to(SALVAGE_SITES[i])
+		if distance < nearest:
+			nearest = distance
+			site = i
+	return site
+
+func assign_miner_task() -> bool:
+	miner_assignments += 1
+	var task := pick_autonomous_task(31, miner_assignments, miner_position)
+	salvage_mode = task == "hull"
+	if task == "hull":
+		miner_hull_site = closest_open_salvage_site(miner_position)
+		miner_work_time = 0.0
+		return miner_hull_site >= 0
+	if task == "ore":
+		miner_rock = -1
+		miner_work_time = 0.0
+		return choose_mining_site()
+	miner_hull_site = -1
+	miner_rock = -1
+	miner_work_time = 0.0
+	return false
+
+func assign_worker_task(worker: Dictionary, identity: int) -> bool:
+	worker["assignments"] = int(worker["assignments"]) + 1
+	var task := pick_autonomous_task(identity, int(worker["assignments"]), worker["position"])
+	worker["task"] = task
+	worker["to_hull"] = true # Outbound leg to the chosen material.
+	worker["time"] = 0.0
+	if task == "hull":
+		var site := closest_open_salvage_site(worker["position"])
+		worker["site_index"] = site
+		return site >= 0
+	if task == "ore":
+		var rock := OreField.nearest_viable_rock(
+			STOCKPILE, player, COMMS_RANGE, asteroid_mined, int(worker["assignments"])
+		)
+		worker["rock"] = rock
+		if rock < 0:
+			return false
+		worker["worksite"] = OreField.near_surface(rock, STOCKPILE)
+		return true
+	return false
 
 func rock_remaining(index: int) -> int:
 	return maxi(0, OreField.rock_capacity(index) - asteroid_mined[index])
