@@ -19,8 +19,8 @@ var rock_original_colors: Array = []
 var rock_erased := PackedInt32Array()
 var wreck_image: Image
 var wreck_texture: ImageTexture
-var wreck_cells: Array[Vector2i] = []
-var wreck_erased := 0
+var wreck_site_cells: Array = []
+var wreck_site_erased := PackedInt32Array()
 
 func _ready() -> void:
 	clip_contents = true
@@ -289,19 +289,42 @@ func build_wreck_pixels() -> void:
 	var y0 := clampi(floori((HULL_PEEL_BOUNDS.position.y - HULL_BOUNDS.position.y) / HULL_BOUNDS.size.y * h), 0, h)
 	var x1 := clampi(ceili((HULL_PEEL_BOUNDS.end.x - HULL_BOUNDS.position.x) / HULL_BOUNDS.size.x * w), 0, w)
 	var y1 := clampi(ceili((HULL_PEEL_BOUNDS.end.y - HULL_BOUNDS.position.y) / HULL_BOUNDS.size.y * h), 0, h)
-	wreck_cells.clear()
+	wreck_site_cells.clear()
+	wreck_site_erased.clear()
+	var site_pixels: Array[Vector2] = []
+	for i in range(State.SALVAGE_SITES.size()):
+		var site: Vector2 = State.SALVAGE_SITES[i]
+		site_pixels.append((site - HULL_BOUNDS.position) / HULL_BOUNDS.size * Vector2(w, h))
+		wreck_site_cells.append([])
+		wreck_site_erased.append(0)
 	for y in range(y0, y1, CUT_TILE):
 		for x in range(x0, x1, CUT_TILE):
-			if wreck_image.get_pixel(x, y).a > 0.25:
-				wreck_cells.append(Vector2i(x, y))
-	# A jagged cutting front works across the hull instead of random holes.
-	wreck_cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
-		var lhs := float(a.x) + 11.0 * sin(a.y * 0.075) + 7.0 * sin(a.x * 0.09 + a.y * 0.11)
-		var rhs := float(b.x) + 11.0 * sin(b.y * 0.075) + 7.0 * sin(b.x * 0.09 + b.y * 0.11)
-		return lhs < rhs
-	)
+			if wreck_image.get_pixel(x, y).a <= 0.25:
+				continue
+			var cell := Vector2i(x, y)
+			var which := 0
+			var nearest := INF
+			for i in range(site_pixels.size()):
+				var dist := Vector2(cell).distance_squared_to(site_pixels[i])
+				if dist < nearest:
+					nearest = dist
+					which = i
+			wreck_site_cells[which].append(cell)
+	# Each salvager peels its own hull zone from the intake-facing surface,
+	# leaving a ragged frontier directly adjacent to that worksite.
+	for i in range(wreck_site_cells.size()):
+		var anchor: Vector2 = site_pixels[i]
+		var direction: Vector2 = (State.STOCKPILE - State.SALVAGE_SITES[i]).normalized()
+		var working_axis := (direction * Vector2(w, h) / HULL_BOUNDS.size).normalized()
+		var cells: Array = wreck_site_cells[i]
+		cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+			var first := (Vector2(a) - anchor).dot(working_axis)
+			var second := (Vector2(b) - anchor).dot(working_axis)
+			first += 6.0 * sin(float(a.x) * 0.075 + float(a.y) * 0.11)
+			second += 6.0 * sin(float(b.x) * 0.075 + float(b.y) * 0.11)
+			return first > second
+		)
 	wreck_texture = ImageTexture.create_from_image(wreck_image)
-	wreck_erased = 0
 
 func sync_matter_visuals(state: State) -> void:
 	for index in range(OreField.ROCK_COUNT):
@@ -324,15 +347,23 @@ func sync_matter_visuals(state: State) -> void:
 		rock_erased[index] = current
 		rock_textures[index].update(image)
 	if wreck_texture != null:
-		var wreck_target := clampi(floori(float(wreck_cells.size()) * state.hull_cut_fraction()), 0, wreck_cells.size())
-		# Limit large texture uploads to meaningful progress steps.
-		if wreck_target - wreck_erased >= 14 or (wreck_target == wreck_cells.size() and wreck_target > wreck_erased):
-			while wreck_erased < wreck_target:
-				var p := wreck_cells[wreck_erased]
-				for py in range(p.y, mini(p.y + CUT_TILE, wreck_image.get_height())):
-					for px in range(p.x, mini(p.x + CUT_TILE, wreck_image.get_width())):
+		var any_changed := false
+		for i in range(wreck_site_cells.size()):
+			var cells: Array = wreck_site_cells[i]
+			var target := clampi(floori(float(cells.size()) * state.hull_site_visual_units(i)), 0, cells.size())
+			var current := wreck_site_erased[i]
+			# Upload only after a worthwhile change, unless a region completes.
+			if target - current < 12 and target != cells.size():
+				continue
+			while current < target:
+				var pixel: Vector2i = cells[current]
+				for py in range(pixel.y, mini(pixel.y + CUT_TILE, wreck_image.get_height())):
+					for px in range(pixel.x, mini(pixel.x + CUT_TILE, wreck_image.get_width())):
 						wreck_image.set_pixel(px, py, Color.TRANSPARENT)
-				wreck_erased += 1
+				current += 1
+			wreck_site_erased[i] = current
+			any_changed = true
+		if any_changed:
 			wreck_texture.update(wreck_image)
 
 func draw_ore_field() -> void:
