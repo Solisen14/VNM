@@ -61,6 +61,10 @@ A major buried subsystem is **not** instantly unlocked or teleported into operat
 4. Available drones temporarily suspend ordinary mining as necessary, haul the recovered structure to the chosen location, and position/reassemble/anchor it. This must be visible and take time. Respect range, capacity, navigable space and workload.
 5. Only after placement and any required repairs or supply hookups can the structure operate.
 
+**Early UI naming and onboarding:** Until the Salvage Insight, the provisional cache is called **Collection Point**, with only a sealed transfer port visible; do not name it “Intake Cache” or identify the refinery's intake function prematurely. Immediately after repairing Miner 031, prompt HAL to right-click the Depleted Ore Field to mine personally, then right-click Collection Point to deposit raw ore. At Salvage, surface the repair path clearly: if HAL's hold is too full (e.g., three ore of five slots), unload first, then right-click Collection Point again for a three-slot 2 Fe + 1 Cu repair package, then right-click any damaged worker 042–044. Clicking an unrepairable worker should explain what's missing rather than silently doing nothing.
+
+**Map navigation:** Hover at the outer edges of the map to pan the camera smoothly, detaching the follow mode. Only map-area hover counts, not the UI sidebar, and pause the edge-scroll during Insight modal dialogues. Retain middle-mouse drag and the Follow controller control.
+
 **After the first refinery is placed**, prompt the player to **choose the location of the first permanent mining stockpile**. Until then, the Asterion wreck stockpile can act as a provisional delivery/cache site so the original tutorial remains coherent. Do not silently auto-place the permanent stockpile.
 
 This placement sequence should teach base construction before players are expected to site dozens of facilities. Infrastructure location remains a meaningful player decision even though drone behaviour is autonomous.
