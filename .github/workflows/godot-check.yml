@@ -35,3 +35,5 @@ jobs:
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass2_map_smoke.gd
       - name: Verify second Insight, salvage drones and intact material accounting
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass3_smoke.gd
+      - name: Verify paused Salvage popup and HUD progression
+        run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass3_ui_smoke.gd
