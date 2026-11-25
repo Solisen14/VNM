@@ -226,7 +226,7 @@ func link_status() -> String:
 		return "STANDBY"
 	if miner_position.distance_to(player) > COMMS_RANGE:
 		return "RECONNECTING"
-	var current_worksite := SALVAGE_SITES[miner_hull_site] if salvage_mode and miner_hull_site >= 0 else miner_worksite
+	var current_worksite: Vector2 = SALVAGE_SITES[miner_hull_site] if salvage_mode and miner_hull_site >= 0 else miner_worksite
 	if to_field and current_worksite.distance_to(player) > COMMS_RANGE:
 		return "WORKSITE OUT OF RANGE"
 	if STOCKPILE.distance_to(player) > COMMS_RANGE:
@@ -696,7 +696,7 @@ func tick_miner(delta: float) -> void:
 				if not choose_mining_site() and not assign_miner_task():
 					miner_velocity = miner_velocity.move_toward(Vector2.ZERO, MINER_ACCELERATION * delta)
 					return
-	var source := SALVAGE_SITES[miner_hull_site] if salvage_mode else miner_worksite
+	var source: Vector2 = SALVAGE_SITES[miner_hull_site] if salvage_mode else miner_worksite
 	var target := source if to_field else STOCKPILE
 	if target.distance_to(player) > COMMS_RANGE:
 		miner_velocity = miner_velocity.move_toward(Vector2.ZERO, MINER_ACCELERATION * delta)
