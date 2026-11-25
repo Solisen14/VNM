@@ -514,6 +514,8 @@ func issue(contact: String) -> void:
 		return
 	if contact == "ore" and action == "Extract ore sample":
 		manual_ore_destination()
+	if contact == "wreck" and action == "Salvage refinery access plating":
+		manual_hull_site = closest_open_salvage_site(player)
 	if player.distance_to(action_position(contact, action)) <= INTERACT_RANGE and velocity.length() <= 25:
 		has_destination = false
 		pending_contact = ""
@@ -538,6 +540,9 @@ func tick_work(delta: float) -> void:
 	if work_action.is_empty():
 		return
 	if player.distance_to(action_position(work_contact, work_action)) > INTERACT_RANGE or command_for(work_contact) != work_action:
+		cancel_work()
+		return
+	if work_action == "Salvage refinery access plating" and (manual_hull_site < 0 or hull_site_units[manual_hull_site] >= SALVAGE_SITE_QUOTA):
 		cancel_work()
 		return
 	work_time += delta
@@ -775,10 +780,30 @@ func field_cut_fraction() -> float:
 func hull_cut_fraction() -> float:
 	return clampf(float(hull_extracted) / float(REFINERY_EXPOSURE), 0.0, 1.0)
 
+func extract_hull(site_index: int, requested: int) -> int:
+	if not salvage_insight_unlocked or refinery_exposed or site_index < 0 or site_index >= SALVAGE_SITES.size():
+		return 0
+	var amount := mini(requested, mini(SALVAGE_SITE_QUOTA - hull_site_units[site_index],
+		REFINERY_EXPOSURE - hull_extracted))
+	if amount <= 0:
+		return 0
+	hull_site_units[site_index] += amount
+	hull_extracted += amount
+	if hull_extracted >= REFINERY_EXPOSURE:
+		refinery_exposed = true
+		report("Refinery uncovered · Other hull sectors remain locked")
+	return amount
+
 func hull_site_visual_units(site_index: int) -> float:
 	var progress := float(hull_site_units[site_index])
+	if work_action == "Salvage refinery access plating" and manual_hull_site == site_index:
+		progress += float(mini(3, SALVAGE_SITE_QUOTA - hull_site_units[site_index])) * work_fraction()
+	if phase == Phase.HAULING and salvage_mode and to_field and miner_hull_site == site_index:
+		if miner_position.distance_to(SALVAGE_SITES[site_index]) <= 2.5:
+			progress += float(mini(MINER_LOAD_SIZE, SALVAGE_SITE_QUOTA - hull_site_units[site_index])) * clampf(
+				miner_work_time / HULL_CUT_TIME, 0.0, 1.0)
 	for worker in salvage_workers:
-		if not bool(worker["active"]) or not bool(worker["to_hull"]):
+		if not bool(worker["active"]) or not bool(worker["to_hull"]) or String(worker["task"]) != "hull":
 			continue
 		if int(worker["site_index"]) != site_index:
 			continue
