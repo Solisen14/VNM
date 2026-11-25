@@ -50,7 +50,7 @@ const WORK_TIMES := {
 	"Repair mining drone": 7.0,
 	"Unload raw ore": 3.5,
 	"Collect repair supplies": 4.0,
-	"Repair salvage drone": 7.0,
+	"Repair worker": 7.0,
 	"Salvage refinery access plating": 12.0,
 	"Unload hull feedstock": 3.5,
 }
@@ -61,7 +61,7 @@ const WORK_LABELS := {
 	"Repair mining drone": "Repairing miner",
 	"Unload raw ore": "Unloading raw ore",
 	"Collect repair supplies": "Collecting repair supplies",
-	"Repair salvage drone": "Restoring worker",
+	"Repair worker": "Restoring worker",
 	"Salvage refinery access plating": "Cutting authorized hull sector",
 	"Unload hull feedstock": "Unloading recovered hull",
 }
@@ -513,12 +513,45 @@ func command_for(contact: String) -> String:
 	var index := salvage_index(contact)
 	if index >= 0 and salvage_insight_unlocked and not bool(salvage_workers[index]["active"]):
 		if repair_kits > 0 and has_worker_capacity():
-			return "Repair salvage drone"
+			return "Repair worker"
+	return ""
+
+func interaction_hint(contact: String) -> String:
+	# Right-click guidance remains available even when the action is blocked.
+	if contact == "ore" and controller_load() >= HOLD:
+		return "HAL's hold is full. Right-click the Collection Point to unload before mining again."
+	if contact == "stockpile" and phase >= Phase.HAULING:
+		if ore > 0 or hull_cargo > 0:
+			return "Right-click to unload HAL's materials. Click again to collect repair supplies."
+		if salvage_insight_unlocked and repair_kits == 0:
+			if not has_worker_capacity():
+				return "Coordination limit reached: %d active drones." % DRONE_CAPACITY
+			if controller_load() + 3 > HOLD:
+				return "Repair supplies take 3 cargo spaces. Free space in HAL's hold first."
+			if stock_fe < 2 or stock_cu < 1:
+				return "Repair supplies require 2 Fe and 1 Cu at the Collection Point. Continue mining."
+			return "Right-click here to collect repair supplies (2 Fe + 1 Cu), then visit a damaged worker."
+	var index := salvage_index(contact)
+	if index >= 0 and salvage_insight_unlocked and not bool(salvage_workers[index]["active"]):
+		if not has_worker_capacity():
+			return "HAL has reached its %d-drone coordination limit." % DRONE_CAPACITY
+		if repair_kits > 0:
+			return "Ready to repair. Right-click this worker to install the supplies."
+		if controller_load() + 3 > HOLD:
+			return "Repair needs 2 Fe + 1 Cu. First unload HAL's cargo at the Collection Point."
+		if stock_fe < 2 or stock_cu < 1:
+			return "Repair needs 2 Fe + 1 Cu. Mine more material and deposit it at the Collection Point."
+		return "Repair needs 2 Fe + 1 Cu. Right-click the Collection Point to collect supplies, then return."
 	return ""
 
 func issue(contact: String) -> void:
 	var action := command_for(contact)
-	if action.is_empty() or contact == work_contact or contact == pending_contact:
+	if action.is_empty():
+		var hint := interaction_hint(contact)
+		if not hint.is_empty():
+			report(hint)
+		return
+	if contact == work_contact or contact == pending_contact:
 		return
 	if contact == "ore" and action == "Extract ore sample":
 		manual_ore_destination()
@@ -617,14 +650,14 @@ func execute(contact: String, action: String) -> void:
 			stock_fe += cargo_fe
 			stock_cu += cargo_cu
 			stock_si += cargo_si
-			report("HAL unloaded %d raw units at the intake cache" % ore)
+			report("HAL deposited %d raw units at the Collection Point" % ore)
 			ore = 0
 			cargo_fe = 0
 			cargo_cu = 0
 			cargo_si = 0
 		"Unload hull feedstock":
 			hull_stock += hull_cargo
-			report("HAL unloaded %d hull units at the intake cache" % hull_cargo)
+			report("HAL deposited %d hull units at the Collection Point" % hull_cargo)
 			hull_cargo = 0
 		"Salvage refinery access plating":
 			if manual_hull_site < 0:
@@ -640,7 +673,7 @@ func execute(contact: String, action: String) -> void:
 			stock_cu -= 1
 			repair_kits += 1
 			report("Repair supplies secured · 2 Fe + 1 Cu")
-		"Repair salvage drone":
+		"Repair worker":
 			var index := salvage_index(contact)
 			if index < 0 or repair_kits == 0 or not has_worker_capacity():
 				return
@@ -662,7 +695,7 @@ func contact_name(contact: String) -> String:
 		"wreck": return "MCV Asterion" if scanned.has(contact) else "Contact 03"
 		"parts_a": return "Wrecked drone A"
 		"parts_b": return "Wrecked drone B"
-		"stockpile": return "Asterion intake cache"
+		"stockpile": return "Collection Point"
 	var index := salvage_index(contact)
 	if index >= 0:
 		return "Worker %03d" % [42 + index] if bool(salvage_workers[index]["active"]) else "Damaged worker %03d" % [42 + index]
@@ -745,7 +778,7 @@ func tick_miner(delta: float) -> void:
 			stock_si += miner_si
 			deliveries += 1
 			if deliveries == 1:
-				report("First automated ore delivery · %d units at the intake" % miner_cargo)
+				report("First automated ore delivery · %d units at the Collection Point" % miner_cargo)
 			elif deliveries >= 5 and not salvage_insight_ready:
 				salvage_insight_ready = true
 				report("Why is ore collecting here? · Asterion intake identified")
