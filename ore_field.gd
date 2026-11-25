@@ -1,13 +1,13 @@
 extends RefCounted
 
 # Deterministic field layout, independent of the renderer.
-# The field contains exactly 100 raw material units: 65 Fe, 25 Cu, 10 Si.
+# A depleted mining field retaining 137 raw units: 89 Fe, 34 Cu, 14 Si.
 const CENTER := Vector2(530, -215)
 const ROCK_COUNT := 26
-const TOTAL_UNITS := 100
-const FE_UNITS := 65
-const CU_UNITS := 25
-const SI_UNITS := 10
+const TOTAL_UNITS := 137
+const FE_UNITS := 89
+const CU_UNITS := 34
+const SI_UNITS := 14
 
 static func rock_center(index: int) -> Vector2:
 	return CENTER + Vector2.from_angle(float(index) * 2.39996) * sqrt(float(index)) * 21.0
@@ -16,17 +16,12 @@ static func rock_radius(index: int) -> float:
 	return 12.0 + float((index * 9) % 11)
 
 static func rock_capacity(index: int) -> int:
-	# Multiplying by 7 permutes the indices mod 26. Ten asteroids have
-	# 3 units, ten have 4 and six have 5, giving precisely 100.
-	var slot := (index * 7) % ROCK_COUNT
-	if slot < 6:
-		return 5
-	if slot < 16:
-		return 4
-	return 3
+	# Each physical rock retains four to seven recoverable units.
+	# Sum of all 26 capacities = 137, deliberately not a round number.
+	return 4 + (index * 7) % 3 + (1 if (index * 7) % ROCK_COUNT < 8 else 0)
 
 static func mineral_at(ordinal: int) -> String:
-	# Full-period permutation across the 100 extraction events. Local
+	# Full-period permutation across the 137 extraction events. Local
 	# batches are mixed, while the whole field's chemistry is exact.
 	var slot := (ordinal * 37 + 11) % TOTAL_UNITS
 	if slot < FE_UNITS:

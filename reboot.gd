@@ -37,6 +37,9 @@ var notice: Label
 var research: PanelContainer
 var insight_popup: CenterContainer
 var insight_open_button: Button
+var insight_popup_title: Label
+var insight_headline: Label
+var insight_description: Label
 var work_panel: VBoxContainer
 var work_caption: Label
 var work_progress: ProgressBar
@@ -139,14 +142,18 @@ func build_insight_popup(view: Control) -> void:
 	message.custom_minimum_size.x = 320
 	message.add_theme_constant_override("separation", 12)
 	insight_popup.add_child(panel(message, "#192725", 18))
-	message.add_child(make_label("FIRST INSIGHT", 13, GREEN))
-	message.add_child(make_label("I can repair the mining drone.", 21, PALE))
-	var instruction := paragraph(message, 15, MUTED)
-	instruction.text = "Press I to open the Insight Tree and see what Field Repair requires."
+	insight_popup_title = make_label("FIRST INSIGHT", 13, GREEN)
+	message.add_child(insight_popup_title)
+	insight_headline = make_label("I can repair the mining drone.", 21, PALE)
+	message.add_child(insight_headline)
+	insight_description = paragraph(message, 15, MUTED)
+	insight_description.text = "Press I to open the Insight Tree and see what Field Repair requires."
 	insight_open_button = make_button(message, "Open Insight Tree [I]", open_first_insight)
 	insight_popup.hide()
 
 func open_first_insight() -> void:
+	if state.salvage_insight_ready and not state.salvage_insight_unlocked:
+		state.unlock_salvage()
 	insight_popup.hide()
 	research.show()
 	insight_open_button.release_focus()
@@ -175,8 +182,19 @@ func _physics_process(delta: float) -> void:
 		if state.phase == State.Phase.CONTACTS:
 			map.frame_signals()
 		if state.phase == State.Phase.FIELD_REPAIR:
+			insight_popup_title.text = "FIRST INSIGHT"
+			insight_headline.text = "I can repair the mining drone."
+			insight_description.text = "Press I to inspect Field Repair and the materials it requires."
+			insight_open_button.text = "Open Insight Tree [I]"
 			insight_popup.show()
 			insight_open_button.grab_focus()
+	if state.salvage_insight_ready and not state.salvage_insight_unlocked and not insight_popup.visible:
+		insight_popup_title.text = "SECOND INSIGHT  /  SALVAGE"
+		insight_headline.text = "Why is the ore stockpiling here?"
+		insight_description.text = "The Asterion's intake is still receiving ore, but its refinery is buried beneath the hull. I can salvage the mothership. Three repairable worker signals are nearby."
+		insight_open_button.text = "Uncover Salvage Insight [I]"
+		insight_popup.show()
+		insight_open_button.grab_focus()
 	refresh()
 	map.queue_redraw()
 
@@ -244,8 +262,12 @@ func refresh() -> void:
 	prompt.text = PHASE_PROMPTS[phase]
 	if state.deliveries > 0 and not state.salvage_insight_ready:
 		prompt.text = "Ore delivery %d complete. Miner 031 is selecting its next autonomous trip." % state.deliveries
-	if state.salvage_insight_ready:
-		prompt.text = "Five deliveries confirmed. The Salvage Insight is the next chapter; mothership disassembly remains locked for now."
+	if state.salvage_insight_ready and not state.salvage_insight_unlocked:
+		prompt.text = "Five deliveries confirmed at the Asterion's former ore intake. A new Insight is available."
+	if state.salvage_insight_unlocked:
+		prompt.text = "Three dormant salvagers detected. Right-click the intake cache to collect repair supplies (2 Fe + 1 Cu), then visit each damaged worker."
+	if state.refinery_exposed:
+		prompt.text = "Damaged refinery uncovered beneath the hull. The salvagers have paused to protect it. Recovering and relocating it comes next."
 	var controls := "Scroll / Q and E to zoom"
 	if phase >= State.Phase.FLIGHT:
 		controls += "   ·   A/D turn   ·   W/S thrust"
@@ -267,13 +289,15 @@ func refresh() -> void:
 		work_caption.text = "%s   %d%%" % [State.WORK_LABELS[state.work_action], mini(99, floori(progress))]
 		work_progress.value = progress
 	cargo.visible = phase >= State.Phase.FIELD_REPAIR
-	cargo.text = "CONTROLLER CARGO   %d / %d\nOre ×%d   ·   Spare parts ×%d" % [state.ore + state.parts, State.HOLD, state.ore, state.parts]
+	cargo.text = "CONTROLLER CARGO   %d / %d\nRaw ore ×%d   ·   Spare parts ×%d\nRepair supplies ×%d" % [
+		state.controller_load(), State.HOLD, state.ore, state.parts, state.repair_kits
+	]
 	if phase >= State.Phase.HAULING:
 		var unmined: Dictionary = state.field_remaining_material()
 		cargo.text += "\n\nORE FIELD 01   RAW MATTER\nFe %d  ·  Cu %d  ·  Si %d remaining" % [
 			int(unmined["Fe"]), int(unmined["Cu"]), int(unmined["Si"])
 		]
-		cargo.text += "\n\nWRECK STOCKPILE  (%d units)\nFe %d  ·  Cu %d  ·  Si %d\nOre runs %d  ·  Miner cargo %d" % [
+		cargo.text += "\n\nASTERION INTAKE CACHE  (%d units)\nFe %d  ·  Cu %d  ·  Si %d\nOre runs %d  ·  Miner cargo %d" % [
 			state.stock_ore, state.stock_fe, state.stock_cu, state.stock_si,
 			state.deliveries, state.miner_cargo
 		]
@@ -281,15 +305,28 @@ func refresh() -> void:
 			state.active_drones, State.DRONE_CAPACITY, int(State.COMMS_RANGE),
 			state.link_status(), state.miner_status()
 		]
+		if state.salvage_insight_unlocked:
+			var restored := 0
+			for worker in state.salvage_workers:
+				if bool(worker["active"]):
+					restored += 1
+			cargo.text += "\n\nASTERION SALVAGE\nWorkers %d / 3  ·  Hull %d / %d\nFeedstock delivered ×%d" % [
+				restored, state.hull_extracted, State.REFINERY_EXPOSURE, state.hull_stock
+			]
 	notice.text = state.notice if state.notice_time > 0 else ""
 	notice.visible = not notice.text.is_empty()
 	research_title.text = "◆  Field Repair"
 	research_status.text = "Ore   %d / %d\nSpare parts   %d / %d\nRepair the damaged miner" % [state.ore, State.ORE_REQUIRED, state.parts, State.PARTS_REQUIRED]
 	if phase >= State.Phase.HAULING:
 		research_title.text += "  ✓"
-		research_status.text = "Complete · Miner 031 restored.\nAutonomous extraction online.\nNext Insight: Salvage (5 deliveries)."
-		if state.salvage_insight_ready:
-			research_status.text += "\nThreshold reached; feature arrives in Pass 3."
+		research_status.text = "Field Repair complete · Miner 031 online.\nSalvage threshold: %d / 5 deliveries." % mini(5, state.deliveries)
+		if state.salvage_insight_unlocked:
+			research_title.text = "◆ Field Repair ✓   ◆ Salvage ✓"
+			research_status.text = "Salvage unlocked. Three repairable workers detected.\nRecovered hull material: %d / %d units." % [
+				state.hull_extracted, State.REFINERY_EXPOSURE
+			]
+			if state.refinery_exposed:
+				research_status.text += "\nRefinery exposed; structural recovery follows in Pass 4."
 
 func refresh_boot() -> void:
 	var waiting := state.phase == State.Phase.SAFE_MODE

@@ -19,8 +19,8 @@ var rock_original_colors: Array = []
 var rock_erased := PackedInt32Array()
 var wreck_image: Image
 var wreck_texture: ImageTexture
-var wreck_cells: Array[Vector2i] = []
-var wreck_erased := 0
+var wreck_site_cells: Array = []
+var wreck_site_erased := PackedInt32Array()
 
 func _ready() -> void:
 	clip_contents = true
@@ -63,6 +63,10 @@ func _gui_input(event: InputEvent) -> void:
 					game.left_command(world_point(event.position))
 				MOUSE_BUTTON_RIGHT:
 					var contact := at_marker(event.position)
+					if contact.is_empty() and game.state.scanned.has("ore"):
+						var under_cursor := world_point(event.position)
+						if game.state.is_charted(under_cursor) and OreField.within_field(under_cursor):
+							contact = "ore"
 					if not contact.is_empty():
 						game.right_command(contact)
 		accept_event()
@@ -119,6 +123,7 @@ func _draw() -> void:
 		var exterior: Texture2D = wreck_texture if wreck_texture != null else hull
 		draw_texture_rect(exterior, Rect2(screen_point(HULL_BOUNDS.position), HULL_BOUNDS.size * zoom), false)
 	draw_ore_field()
+	draw_refinery_intake()
 	draw_fog(state)
 	draw_arc(screen_point(state.player), State.SENSOR_RANGE * zoom, 0, TAU, 72, Color("#4b7772"), 1, true)
 
@@ -137,6 +142,16 @@ func _draw() -> void:
 				draw_work_arc(screen_point(state.miner_position), 13, state.miner_work_time / duration)
 		else:
 			reticle(screen_point(state.miner_position), Color(CYAN, 0.65), 7)
+	if state.salvage_insight_unlocked:
+		for worker in state.salvage_workers:
+			if not bool(worker["active"]):
+				continue
+			var worker_position: Vector2 = worker["position"]
+			if state.is_charted(worker_position):
+				draw_worker_light(worker_position, float(worker["heading"]), true, int(worker["cargo"]) > 0)
+				if float(worker["time"]) > 0.0:
+					var duration: float = State.HULL_CUT_TIME if bool(worker["to_hull"]) else State.MINER_UNLOAD_TIME
+					draw_work_arc(screen_point(worker_position), 12.0, float(worker["time"]) / duration)
 	for contact in State.CONTACTS:
 		if state.is_visible(contact):
 			draw_contact(state, contact)
@@ -147,6 +162,22 @@ func _draw() -> void:
 	draw_string(get_theme_default_font(), Vector2(17, size.y - 18),
 		"LOCAL SENSOR RANGE  /  %d%% VIEW" % roundi(zoom * 100), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, CYAN)
 	draw_scale_ruler()
+
+func draw_refinery_intake() -> void:
+	# Explicitly outside the upper hull edge: a provisional intake staging pad.
+	var pad := screen_point(State.STOCKPILE)
+	var mouth := screen_point(State.REFINERY_INTAKE)
+	var radius := maxf(6.0, 18.0 * zoom)
+	draw_line(pad, mouth, Color("#769f91"), maxf(1.0, 2.0 * zoom), true)
+	draw_circle(pad, radius + 4.0 * zoom, Color(0.04, 0.12, 0.14, 0.78), true)
+	draw_circle(pad, radius, Color("#92aea5"), false, maxf(1.0, 1.8 * zoom))
+	draw_line(pad + Vector2(-10, 0) * zoom, pad + Vector2(10, 0) * zoom, Color("#b3d8cb"), 2.0, true)
+	draw_line(pad + Vector2(0, -10) * zoom, pad + Vector2(0, 10) * zoom, Color("#b3d8cb"), 2.0, true)
+	draw_rect(Rect2(mouth - Vector2(22, 11) * zoom, Vector2(44, 22) * zoom), Color("#344d4c"))
+	draw_rect(Rect2(mouth - Vector2(22, 11) * zoom, Vector2(44, 22) * zoom), Color("#a4c1aa"), false, maxf(1.0, zoom))
+	if zoom > 0.65:
+		write(pad + Vector2(-37, -24), "STAGING PAD", Color("#a9c8b9"), 11)
+		write(mouth + Vector2(-30, -17), "INTAKE", Color("#b6c7ad"), 11)
 
 func draw_route_hint(from: Vector2, to: Vector2) -> void:
 	# A faint, schematic traffic corridor. Workers themselves steer along
@@ -258,19 +289,42 @@ func build_wreck_pixels() -> void:
 	var y0 := clampi(floori((HULL_PEEL_BOUNDS.position.y - HULL_BOUNDS.position.y) / HULL_BOUNDS.size.y * h), 0, h)
 	var x1 := clampi(ceili((HULL_PEEL_BOUNDS.end.x - HULL_BOUNDS.position.x) / HULL_BOUNDS.size.x * w), 0, w)
 	var y1 := clampi(ceili((HULL_PEEL_BOUNDS.end.y - HULL_BOUNDS.position.y) / HULL_BOUNDS.size.y * h), 0, h)
-	wreck_cells.clear()
+	wreck_site_cells.clear()
+	wreck_site_erased.clear()
+	var site_pixels: Array[Vector2] = []
+	for i in range(State.SALVAGE_SITES.size()):
+		var site: Vector2 = State.SALVAGE_SITES[i]
+		site_pixels.append((site - HULL_BOUNDS.position) / HULL_BOUNDS.size * Vector2(w, h))
+		wreck_site_cells.append([])
+		wreck_site_erased.append(0)
 	for y in range(y0, y1, CUT_TILE):
 		for x in range(x0, x1, CUT_TILE):
-			if wreck_image.get_pixel(x, y).a > 0.25:
-				wreck_cells.append(Vector2i(x, y))
-	# A jagged cutting front works across the hull instead of random holes.
-	wreck_cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
-		var lhs := float(a.x) + 11.0 * sin(a.y * 0.075) + 7.0 * sin(a.x * 0.09 + a.y * 0.11)
-		var rhs := float(b.x) + 11.0 * sin(b.y * 0.075) + 7.0 * sin(b.x * 0.09 + b.y * 0.11)
-		return lhs < rhs
-	)
+			if wreck_image.get_pixel(x, y).a <= 0.25:
+				continue
+			var cell := Vector2i(x, y)
+			var which := 0
+			var nearest := INF
+			for i in range(site_pixels.size()):
+				var dist := Vector2(cell).distance_squared_to(site_pixels[i])
+				if dist < nearest:
+					nearest = dist
+					which = i
+			wreck_site_cells[which].append(cell)
+	# Each salvager peels its own hull zone from the intake-facing surface,
+	# leaving a ragged frontier directly adjacent to that worksite.
+	for i in range(wreck_site_cells.size()):
+		var anchor: Vector2 = site_pixels[i]
+		var direction: Vector2 = (State.STOCKPILE - State.SALVAGE_SITES[i]).normalized()
+		var working_axis := (direction * Vector2(w, h) / HULL_BOUNDS.size).normalized()
+		var cells: Array = wreck_site_cells[i]
+		cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+			var first := (Vector2(a) - anchor).dot(working_axis)
+			var second := (Vector2(b) - anchor).dot(working_axis)
+			first += 6.0 * sin(float(a.x) * 0.075 + float(a.y) * 0.11)
+			second += 6.0 * sin(float(b.x) * 0.075 + float(b.y) * 0.11)
+			return first > second
+		)
 	wreck_texture = ImageTexture.create_from_image(wreck_image)
-	wreck_erased = 0
 
 func sync_matter_visuals(state: State) -> void:
 	for index in range(OreField.ROCK_COUNT):
@@ -293,15 +347,23 @@ func sync_matter_visuals(state: State) -> void:
 		rock_erased[index] = current
 		rock_textures[index].update(image)
 	if wreck_texture != null:
-		var wreck_target := clampi(floori(float(wreck_cells.size()) * state.hull_cut_fraction()), 0, wreck_cells.size())
-		# Limit large texture uploads to meaningful progress steps.
-		if wreck_target - wreck_erased >= 14 or (wreck_target == wreck_cells.size() and wreck_target > wreck_erased):
-			while wreck_erased < wreck_target:
-				var p := wreck_cells[wreck_erased]
-				for py in range(p.y, mini(p.y + CUT_TILE, wreck_image.get_height())):
-					for px in range(p.x, mini(p.x + CUT_TILE, wreck_image.get_width())):
+		var any_changed := false
+		for i in range(wreck_site_cells.size()):
+			var cells: Array = wreck_site_cells[i]
+			var target := clampi(floori(float(cells.size()) * state.hull_site_visual_units(i)), 0, cells.size())
+			var current := wreck_site_erased[i]
+			# Upload only after a worthwhile change, unless a region completes.
+			if target - current < 12 and target != cells.size():
+				continue
+			while current < target:
+				var pixel: Vector2i = cells[current]
+				for py in range(pixel.y, mini(pixel.y + CUT_TILE, wreck_image.get_height())):
+					for px in range(pixel.x, mini(pixel.x + CUT_TILE, wreck_image.get_width())):
 						wreck_image.set_pixel(px, py, Color.TRANSPARENT)
-				wreck_erased += 1
+				current += 1
+			wreck_site_erased[i] = current
+			any_changed = true
+		if any_changed:
 			wreck_texture.update(wreck_image)
 
 func draw_ore_field() -> void:
@@ -326,7 +388,7 @@ func draw_field_composition(state: State) -> void:
 	var area := Rect2(p, Vector2(235, 119))
 	draw_rect(area, Color(0.045, 0.085, 0.105, 0.94))
 	draw_rect(area, Color(CYAN, 0.60), false, 1.0)
-	write(p + Vector2(11, 18), "FIELD 01  /  ELEMENTAL SCAN", CYAN, 12)
+	write(p + Vector2(11, 18), "DEPLETED FIELD / SCAN", CYAN, 12)
 	var left := state.field_remaining_material()
 	var available := int(left["Fe"]) + int(left["Cu"]) + int(left["Si"])
 	write(p + Vector2(11, 34), "RAW MATTER  %d / %d" % [available, OreField.TOTAL_UNITS], Color("#c1ced0"), 11)
@@ -336,7 +398,7 @@ func draw_field_composition(state: State) -> void:
 		var initial := OreField.FE_UNITS if line == 0 else (OreField.CU_UNITS if line == 1 else OreField.SI_UNITS)
 		var pigment := Color("#a6b5b7") if line == 0 else (Color("#cf8e67") if line == 1 else Color("#d9c291"))
 		var y := p.y + 52.0 + float(line) * 19.0
-		write(Vector2(p.x + 11.0, y + 5.0), "%s %d%%" % [symbol, initial], pigment, 11)
+		write(Vector2(p.x + 11.0, y + 5.0), "%s %.1f%%" % [symbol, 100.0 * float(initial) / float(OreField.TOTAL_UNITS)], pigment, 11)
 		draw_rect(Rect2(p.x + 91.0, y - 4.0, 108.0, 6.0), Color("#34464c"))
 		draw_rect(Rect2(p.x + 91.0, y - 4.0, 108.0 * float(remaining) / float(initial), 6.0), pigment)
 		write(Vector2(p.x + 203.0, y + 5.0), "%d" % remaining, Color("#c1ced0"), 11)
@@ -362,18 +424,21 @@ func draw_contact(state: State, contact: String) -> void:
 	var point := contact_screen_point(contact)
 	var on_screen := point.is_equal_approx(actual)
 	var unresolved := contact in State.PRIMARY and not state.scanned.has(contact)
-	var tint := AMBER if unresolved or contact.begins_with("parts") else CYAN
+	var tint := AMBER if unresolved or contact.begins_with("parts") or (contact.begins_with("salvage_") and not state.salvage_worker_active(contact)) else CYAN
 	if unresolved:
 		draw_arc(point, 18, 0, TAU, 30, Color(tint, 0.30), 1.0, true)
 	elif contact.begins_with("parts") and on_screen and state.is_charted(state.position_of(contact)):
 		draw_worker_light(state.position_of(contact), -0.52, false)
 	elif contact == "miner" and on_screen and state.phase < State.Phase.ORDERS:
 		draw_worker_light(state.miner_position, -0.25, false)
+	elif contact.begins_with("salvage_") and not state.salvage_worker_active(contact) and on_screen:
+		draw_worker_light(state.position_of(contact), -0.20, false)
 	var highlight: bool = contact == game.selected or contact == hover
-	if contact != "miner" or state.phase < State.Phase.ORDERS or highlight:
+	var quiet_worker: bool = (contact == "miner" and state.phase >= State.Phase.ORDERS) or (contact.begins_with("salvage_") and state.salvage_worker_active(contact))
+	if not quiet_worker or highlight:
 		reticle(point, tint, 12 if highlight else 8)
-	if contact == "miner" and state.phase >= State.Phase.ORDERS and not highlight:
-		return # Keep the active worker as a white dot until inspected.
+	if quiet_worker and not highlight:
+		return # The active worker is a tiny light, not permanent UI clutter.
 	var caption := state.contact_name(contact).to_upper()
 	if not on_screen:
 		caption += "  ·  OFF SCREEN"

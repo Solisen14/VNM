@@ -26,27 +26,35 @@ This update **preserves the existing reboot and Field Repair tutorial**. Only th
 - **Camera:** Scroll or Q/E can now zoom from 0.18× to 8×. A metre scale bar sits in the lower-right of the map. **Frame signals** continues to show the broader tutorial area.
 - **Separate flight lab:** In Godot, open `swarm_lab.tscn` and press **F6** to preview **1, 10, 100 or 1,000** luminous workers moving using exactly the same motion helper (`worker_motion.gd`). This scene tests rendering and steering only; it is not part of the tutorial's production economy and does not chart terrain.
 
-For repeatable headless tests, run `godot --headless --path . --script res://tests/pass1_smoke.gd` and `godot --headless --path . --script res://tests/pass2_smoke.gd`. They cover the first Insight, Field Repair, autonomous deliveries, site selection, material conservation, controller coordination and range, and player-only map charting.
+For repeatable headless tests, run `godot --headless --path . --script res://tests/pass1_smoke.gd`, `godot --headless --path . --script res://tests/pass2_smoke.gd`, and `godot --headless --path . --script res://tests/pass3_smoke.gd`. The CI workflow verifies script parsing, scene boot, the rendered mining map, each Insight, conservation and autonomous flight.
 
 This is **Pass 1**, not full flocking. Neighbour separation/cohesion, site-specific cutting positions, and large-scale worker aggregation belong to later passes. The player ship still uses its original procedural silhouette at the corrected physical scale; its modular sprite system is planned for Pass 3.
 
 ## Pass 2: Autonomous surface mining
 
 - **No individual mining orders:** After being repaired, Miner 031 heads automatically toward the nearest viable asteroid *surface* on the stockpile-facing side. Small consistent scoring variations prevent identical routes. It returns with up to three units, unloads, then resumes the same rock until empty. Drones never chart the fog.
-- **Discrete field:** The field now consists of 26 finite asteroids containing exactly **100 raw units**. Each individual asteroid has its own remaining yield and transparent sprite mask, consumed in a jagged line from the worker's near-side cutting face, not as a growing circle around the POI.
-- **Mineral accounting:** The initial deposit yields **65 iron (Fe), 25 copper (Cu), 10 silicon (Si)** raw units. Extraction removes these from the field; cargo carries the mixture; the provisional Asterion stockpile stores each raw element separately. These are still raw/unrefined units. The player uses three initial ore samples to repair Miner 031.
+- **Discrete field:** The depleted field now consists of 26 finite asteroids containing **137 remaining raw units**. Each individual asteroid has its own remaining yield and transparent sprite mask, consumed in a jagged line from the worker's near-side cutting face, not as a growing circle around the POI.
+- **Mineral accounting:** The initial deposit yields **89 iron (Fe), 34 copper (Cu), 14 silicon (Si)** raw units. Extraction removes these from the field; cargo carries the mixture; the provisional Asterion stockpile stores each raw element separately. These are still raw/unrefined units. The player uses three initial ore samples to repair Miner 031.
 - **Sensor UI:** Hover over a scanned asteroid or zoom in enough for an overlay showing the initial Fe/Cu/Si composition and how much raw matter remains.
 - **Controller constraints:** HAL starts with a hard maximum of **10 supported worker drones** and a **1,450-world-unit communications radius**. Miner 031 cannot operate beyond that radius and heads back toward HAL if contact is lost. The UI shows network status and drone count. **Coordination Cores are NOT available:** their upgrade is reserved for a later Insight.
-- **Next milestone is not implemented yet:** After the fifth ore delivery, the simulation records that the *Salvage Insight* threshold has been met, but hull disassembly and the three additional repairable drones belong to Pass 3. No manual hull assignment is available during Pass 2.
+- **Next milestone:** After the fifth ore delivery, the *Salvage Insight* pause asks why ore is accumulating at the Asterion's intake. This now leads to three more damaged workers and autonomous hull recovery in Pass 3.
 - **Unchanged:** HAL's flight controls, slow miner acceleration, eight-second extraction time, five-second unloading time, Field Repair, and the tutorial's first pop-up.
 
 **Play note:** When HAL flies far enough away, the miner may stop extraction or follow HAL to restore communications. Returning within the working area allows it to resume. No Coordination Core upgrade is possible in this version.
 
-## Asterion disassembly preview (currently locked)
+## Pass 3: Intake staging, manual mining and salvage discovery
 
-The mothership art still contains the earlier prototype's destructible hull mask and buried refinery visualization. **The working mining-drone assignment that used to unlock it after one delivery is deliberately disabled.** Salvage will instead unlock through a later Insight after five deliveries, with additional repairable drones and physically relocated infrastructure.
+- **HAL can mine again:** After Field Repair, right-click the scanned **Depleted Ore Field** (or a charted asteroid surface) to choose another rock, collect raw ore into HAL's hold, and right-click the intake cache to unload. Extraction uses the same six-second duration; HAL's cargo limit still applies.
+- **Depleted Ore Field:** The first 26-rock deposit retains exactly **137** units: **89 Fe, 34 Cu, 14 Si**, approximately the intended 65/25/10 mixture. These are deliberately irregular resource counts. Sensor bars display percentages and remaining quantities.
+- **Intake cache placement:** The provisional stockpile has moved to a staging pad **above the hull** connected to the Asterion's former refinery intake. Ore flows to this location; it isn't floating over an arbitrary point on the hull.
+- **Second Insight:** Miner 031 makes five deliveries, triggering a pausing Insight: **“Why is the ore stockpiling here?”** Opening it unlocks salvage and reveals three additional dormant salvager signals. They are **not automatically repaired**.
+- **Field repair supplies:** Visit the intake cache to collect a package of **2 Fe + 1 Cu** from its stored raw matter; the package physically occupies three of HAL's five cargo slots. Fly to a disabled salvager and right-click to repair it. Repeat for up to three newly revealed workers. A repaired salvager immediately starts autonomous cutting.
+- **Hull recovery:** Active salvagers travel to separate work sites on the Asterion, cut hull material over 12 seconds, fly the recovered feedstock to the intake cache, and unload over five seconds. After **12 hull units** have been stripped, a damaged refinery is exposed. The salvagers **halt cutting** to protect that component. Relocating and restoring the structure is the next development pass.
+- **Limits and scope:** HAL still supports a maximum of **10 active workers** within its communications radius; no Coordination Core or coordination-capacity upgrade is available yet. The specialized logistics network, relocation of the refinery, permanent stockpile placement, and new drone construction remain future Insights.
 
-The refinery, hauling networks, component manufacturing, and drone replication are not operational in the reboot scene yet. Those belong to subsequent passes.
+**Test tip:** After the fifth delivery, press **I** on the Salvage Insight pop-up. Collect repair supplies from the intake pad, fly to one of the newly pinged dormant salvagers, repair it, and watch material peel away to expose the refinery. You can also keep mining yourself at any time the hold has space.
+
+The refinery, general-purpose hauling networks, component manufacturing, and drone replication are not operational in this scene yet. Those belong to subsequent passes.
 
 ## Earlier Dock 03 mission
 

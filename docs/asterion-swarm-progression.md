@@ -1,6 +1,6 @@
 # VNM — Asterion salvage, swarm autonomy and industrial progression
 
-Status: **Living design specification. Pass 2 autonomous surface mining, Fe/Cu/Si inventory and initial range/cap implemented; later Insights, salvage, factories and drone replication remain designs, not implemented gameplay.**
+Status: **Living design specification. Pass 3 implements recurring HAL manual mining, the irregular depleted field, a second Salvage Insight, three repairable autonomous salvagers, and hull stripping until the refinery is uncovered. Physical structure relocation, refinery operation, coordination upgrades, factories and drone replication remain future work.**
 Recorded 2026-11-24. Preserve the current playable tutorial, the measured pace of HAL and Miner 031, and the pixel-disassembly prototype. Do not treat this file as a request to change code.
 
 ## Core fantasy and world scale
@@ -66,10 +66,10 @@ This placement sequence should teach base construction before players are expect
 
 ## First asteroid field: iron-heavy composition
 
-Provisional composition to display when the POI has been scanned:
-- **Iron (Fe) 65%**
-- **Copper (Cu) 25%**
-- **Silicon (Si) 10%**
+Provisional *target* mix remains approximately 65/25/10; actual playable depleted deposit has **137 raw units**:
+- **Iron (Fe): 89 units (65.0%)**
+- **Copper (Cu): 34 units (24.8%)**
+- **Silicon (Si): 14 units (10.2%)**
 
 These are **game-balancing targets**, not realistic asteroid chemistry. The field is made of physically distinct asteroids; composition may later vary by asteroid or pixel neighborhood. The deposit's mix is recovered when mined and the stockpile/refinery keeps track of that mix.
 
@@ -98,7 +98,7 @@ Eventually recover the other **four founding controllers** and outfit them with 
 ## Build priorities and guardrails
 
 - **Pass 2 implemented:** site-specific asteroid selection and local erosion; autonomous first miner; 65/25/10 Fe/Cu/Si field and hover/zoom HUD; a fixed cap of 10 workers and basic communications range, **with no Coordination Cores or early capacity upgrades**. Five deliveries now set the Salvage-ready flag, but do not unlock salvage yet. Approved flight handling and mining pace remain.
-- **Next (Pass 3):** turn the five-delivery threshold into the Salvage Insight; physically cut the Asterion hull and expose subsystems; reveal three more repairable drones. Subsequent work recovers/places the refinery, prompts stockpile siting and adds the two further repairable drones.
+- **Pass 3 implemented:** five ore deliveries open the second Salvage Insight, three newly detectable salvagers can be restored with cache-collected 2 Fe + 1 Cu supplies each, and the workers autonomously remove 12 units of hull feedstock to reveal a damaged refinery. HAL can continue hand-mining and unloading raw samples; the initial deposit is explicitly depleted with irregular resource totals. The provisional intake cache is now next to the upper Asterion hull rather than on the ship.\n- **Next (Pass 4):** recover/disconnect/place the exposed refinery, allow HAL to choose a permanent stockpile location, introduce general-purpose hauling and elemental refining, and ping two additional repairable workers.
 - **Then:** general-purpose hauling, refining, autofactory recovery, part recipes and first newly manufactured worker.
 - Later: true multi-worker swarm behaviour, more structures, and a **separate future Coordination Core Insight** that unlocks capacity upgrades once progression warrants it; planetary-scale resource abstraction and faction evolution.
 - No immediate rewrite to microscopic atom simulation. Keep visual pixels and resource units consistent.

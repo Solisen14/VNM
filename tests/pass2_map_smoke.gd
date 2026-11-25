@@ -36,5 +36,16 @@ func run_checks() -> void:
 	game.state.tick_miner(State.MINER_EXTRACTION_TIME * 0.5)
 	game.map.queue_redraw()
 	await process_frame
-	print("PASS: VNM Pass 2 gameplay HUD, scanned composition overlay and live asteroid erosion")
+	# Local salvage masking must only cut the currently worked hull section.
+	game.state.salvage_insight_ready = true
+	game.state.unlock_salvage()
+	game.state.hull_site_units[0] = 2
+	game.state.hull_extracted = 2
+	game.map.queue_redraw()
+	await process_frame
+	await process_frame
+	assert(game.map.wreck_site_erased[0] > 0, "Local salvage face failed to cut hull pixels")
+	assert(game.map.wreck_site_erased[1] == 0 and game.map.wreck_site_erased[2] == 0,
+		"Other salvage sites eroded before workers reached them")
+	print("PASS: VNM Pass 2/3 gameplay HUD, asteroid erosion and localized hull salvage")
 	quit(0)
