@@ -67,6 +67,9 @@ func _gui_input(event: InputEvent) -> void:
 						var under_cursor := world_point(event.position)
 						if game.state.is_charted(under_cursor) and OreField.within_field(under_cursor):
 							contact = "ore"
+					if contact.is_empty() and game.state.salvage_insight_unlocked:
+						if HULL_PEEL_BOUNDS.has_point(world_point(event.position)):
+							contact = "wreck"
 					if not contact.is_empty():
 						game.right_command(contact)
 		accept_event()
@@ -76,6 +79,9 @@ func _gui_input(event: InputEvent) -> void:
 			var under_cursor := world_point(event.position)
 			if game.state.is_charted(under_cursor) and OreField.within_field(under_cursor):
 				hover = "ore"
+		if hover.is_empty() and game.state.salvage_insight_unlocked:
+			if HULL_PEEL_BOUNDS.has_point(world_point(event.position)):
+				hover = "wreck"
 		if dragging:
 			camera -= event.relative / zoom
 			accept_event()
@@ -125,14 +131,15 @@ func _draw() -> void:
 	draw_ore_field()
 	draw_refinery_intake()
 	draw_fog(state)
+	draw_salvage_access_zone(state)
 	draw_arc(screen_point(state.player), State.SENSOR_RANGE * zoom, 0, TAU, 72, Color("#4b7772"), 1, true)
 
 	if state.has_destination:
 		var end := screen_point(state.destination)
 		draw_dashed_line(screen_point(state.player), end, Color(CYAN, 0.52), 1.2, 7.0)
 		reticle(end, CYAN, 10)
-	if state.phase == State.Phase.HAULING and state.miner_rock >= 0:
-		var source := State.HULL_WORKSITE if state.salvage_mode else state.miner_worksite
+	if state.phase == State.Phase.HAULING and (state.miner_rock >= 0 or state.miner_hull_site >= 0):
+		var source := State.SALVAGE_SITES[state.miner_hull_site] if state.salvage_mode and state.miner_hull_site >= 0 else state.miner_worksite
 		draw_route_hint(screen_point(source), screen_point(State.STOCKPILE))
 	if state.phase >= State.Phase.ORDERS:
 		if state.is_charted(state.miner_position):
@@ -150,7 +157,7 @@ func _draw() -> void:
 			if state.is_charted(worker_position):
 				draw_worker_light(worker_position, float(worker["heading"]), true, int(worker["cargo"]) > 0)
 				if float(worker["time"]) > 0.0:
-					var duration: float = State.HULL_CUT_TIME if bool(worker["to_hull"]) else State.MINER_UNLOAD_TIME
+					var duration: float = (State.HULL_CUT_TIME if String(worker["task"]) == "hull" else State.MINER_EXTRACTION_TIME) if bool(worker["to_hull"]) else State.MINER_UNLOAD_TIME
 					draw_work_arc(screen_point(worker_position), 12.0, float(worker["time"]) / duration)
 	for contact in State.CONTACTS:
 		if state.is_visible(contact):
@@ -178,6 +185,20 @@ func draw_refinery_intake() -> void:
 	if zoom > 0.65:
 		write(pad + Vector2(-37, -24), "STAGING PAD", Color("#a9c8b9"), 11)
 		write(mouth + Vector2(-30, -17), "INTAKE", Color("#b6c7ad"), 11)
+
+func draw_salvage_access_zone(state: State) -> void:
+	if not state.salvage_insight_unlocked:
+		return
+	var rect := Rect2(screen_point(HULL_PEEL_BOUNDS.position), HULL_PEEL_BOUNDS.size * zoom)
+	var shade := Color("#6e797a") if state.refinery_exposed else Color("#e4ac6b")
+	draw_rect(rect, Color(shade, 0.08))
+	draw_rect(rect, Color(shade, 0.65), false, maxf(1.0, zoom))
+	for i in range(State.SALVAGE_SITES.size()):
+		if state.hull_site_units[i] >= State.SALVAGE_SITE_QUOTA:
+			continue
+		reticle(screen_point(State.SALVAGE_SITES[i]), shade, maxf(5.0, 7.0 * zoom))
+	var title := "REFINERY EXPOSED / ACCESS CLOSED" if state.refinery_exposed else "AUTHORIZED SALVAGE / REFINERY ACCESS ONLY"
+	write(rect.position + Vector2(4.0, -11.0), title, shade, 12)
 
 func draw_route_hint(from: Vector2, to: Vector2) -> void:
 	# A faint, schematic traffic corridor. Workers themselves steer along
