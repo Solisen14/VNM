@@ -29,6 +29,7 @@ const MINER_UNLOAD_TIME := 5.0
 const FIELD_RESERVE := OreField.TOTAL_UNITS
 const HULL_RESERVE := 48
 const REFINERY_EXPOSURE := 12
+const SALVAGE_SITE_QUOTA := 4
 const SALVAGE_CONTACTS := ["salvage_1", "salvage_2", "salvage_3"]
 const SALVAGE_SPAWNS := [Vector2(1040, 560), Vector2(1225, 565), Vector2(1350, 430)]
 const SALVAGE_SITES := [Vector2(1160, 285), Vector2(1255, 325), Vector2(1345, 370)]
@@ -141,6 +142,7 @@ var manual_rock := -1
 var manual_worksite := Vector2.ZERO
 var salvage_insight_unlocked := false
 var salvage_workers: Array[Dictionary] = []
+var hull_site_units := PackedInt32Array([0, 0, 0])
 
 func _init() -> void:
 	for i in range(OreField.ROCK_COUNT):
@@ -154,6 +156,7 @@ func _init() -> void:
 			"clock": float(i) * 0.7,
 			"leg": i,
 			"index": i,
+			"site_index": i,
 			"to_hull": true,
 			"time": 0.0,
 			"cargo": 0,
@@ -674,13 +677,40 @@ func field_cut_fraction() -> float:
 	return clampf(float(field_extracted) / float(FIELD_RESERVE), 0.0, 1.0)
 
 func hull_cut_fraction() -> float:
-	var progress := float(hull_extracted)
+	return clampf(float(hull_extracted) / float(REFINERY_EXPOSURE), 0.0, 1.0)
+
+func hull_site_visual_units(site_index: int) -> float:
+	var progress := float(hull_site_units[site_index])
 	for worker in salvage_workers:
-		if bool(worker["active"]) and bool(worker["to_hull"]) and Vector2(worker["position"]).distance_to(
-			SALVAGE_SITES[int(worker["index"])]
-		) <= 2.5:
-			progress += float(MINER_LOAD_SIZE) * clampf(float(worker["time"]) / HULL_CUT_TIME, 0.0, 1.0)
-	return clampf(progress / float(REFINERY_EXPOSURE), 0.0, 1.0)
+		if not bool(worker["active"]) or not bool(worker["to_hull"]):
+			continue
+		if int(worker["site_index"]) != site_index:
+			continue
+		if Vector2(worker["position"]).distance_to(SALVAGE_SITES[site_index]) > 2.5:
+			continue
+		var uncut := SALVAGE_SITE_QUOTA - hull_site_units[site_index]
+		progress += float(mini(MINER_LOAD_SIZE, uncut)) * clampf(float(worker["time"]) / HULL_CUT_TIME, 0.0, 1.0)
+	return clampf(progress / float(SALVAGE_SITE_QUOTA), 0.0, 1.0)
+
+func choose_salvage_site(worker: Dictionary) -> bool:
+	var current: int = worker["site_index"]
+	if hull_site_units[current] < SALVAGE_SITE_QUOTA:
+		return true
+	var closest := -1
+	var score := INF
+	var position: Vector2 = worker["position"]
+	for i in range(SALVAGE_SITES.size()):
+		if hull_site_units[i] >= SALVAGE_SITE_QUOTA:
+			continue
+		var distance := position.distance_squared_to(SALVAGE_SITES[i])
+		if distance < score:
+			score = distance
+			closest = i
+	if closest < 0:
+		return false
+	worker["site_index"] = closest
+	worker["time"] = 0.0
+	return true
 
 func tick_salvage_workers(delta: float) -> void:
 	for i in range(salvage_workers.size()):
@@ -701,7 +731,10 @@ func tick_salvage_workers(delta: float) -> void:
 			worker["linked"] = true
 		if to_hull and hull_extracted >= REFINERY_EXPOSURE:
 			continue # Don't damage the newly uncovered refinery.
-		var site: Vector2 = SALVAGE_SITES[i]
+		if to_hull and not choose_salvage_site(worker):
+			continue
+		var site_index: int = worker["site_index"]
+		var site: Vector2 = SALVAGE_SITES[site_index]
 		var target := site if to_hull else STOCKPILE
 		if target.distance_to(player) > COMMS_RANGE:
 			worker["velocity"] = Vector2.ZERO
@@ -717,10 +750,12 @@ func tick_salvage_workers(delta: float) -> void:
 			continue
 		worker["time"] = 0.0
 		if to_hull:
-			var removed := mini(MINER_LOAD_SIZE, REFINERY_EXPOSURE - hull_extracted)
+			var removed := mini(MINER_LOAD_SIZE, mini(REFINERY_EXPOSURE - hull_extracted,
+				SALVAGE_SITE_QUOTA - hull_site_units[site_index]))
 			if removed <= 0:
 				continue
 			hull_extracted += removed
+			hull_site_units[site_index] += removed
 			worker["cargo"] = removed
 			worker["to_hull"] = false
 			if hull_extracted >= REFINERY_EXPOSURE and not refinery_exposed:
