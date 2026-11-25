@@ -191,7 +191,7 @@ func _physics_process(delta: float) -> void:
 	if state.salvage_insight_ready and not state.salvage_insight_unlocked and not insight_popup.visible:
 		insight_popup_title.text = "SECOND INSIGHT  /  SALVAGE"
 		insight_headline.text = "Why is the ore stockpiling here?"
-		insight_description.text = "The Asterion's intake is still receiving ore, but its refinery is buried beneath the hull. I can salvage the mothership. Three repairable worker signals are nearby."
+		insight_description.text = "The intake leads to a buried refinery. I can authorize salvage of its access plating, not the rest of the ship. Three damaged workers are nearby; once repaired, they will choose mining or salvage autonomously."
 		insight_open_button.text = "Uncover Salvage Insight [I]"
 		insight_popup.show()
 		insight_open_button.grab_focus()
@@ -265,9 +265,9 @@ func refresh() -> void:
 	if state.salvage_insight_ready and not state.salvage_insight_unlocked:
 		prompt.text = "Five deliveries confirmed at the Asterion's former ore intake. A new Insight is available."
 	if state.salvage_insight_unlocked:
-		prompt.text = "Three dormant salvagers detected. Right-click the intake cache to collect repair supplies (2 Fe + 1 Cu), then visit each damaged worker."
+		prompt.text = "Refinery access only: right-click the highlighted hull zone to salvage it yourself. Restored workers autonomously choose 50% mining / 50% salvage when both jobs are available."
 	if state.refinery_exposed:
-		prompt.text = "Damaged refinery uncovered beneath the hull. The salvagers have paused to protect it. Recovering and relocating it comes next."
+		prompt.text = "Refinery uncovered. This hull sector is now protected. Workers automatically continue mining available ore; structural recovery comes next."
 	var controls := "Scroll / Q and E to zoom"
 	if phase >= State.Phase.FLIGHT:
 		controls += "   ·   A/D turn   ·   W/S thrust"
@@ -289,8 +289,8 @@ func refresh() -> void:
 		work_caption.text = "%s   %d%%" % [State.WORK_LABELS[state.work_action], mini(99, floori(progress))]
 		work_progress.value = progress
 	cargo.visible = phase >= State.Phase.FIELD_REPAIR
-	cargo.text = "CONTROLLER CARGO   %d / %d\nRaw ore ×%d   ·   Spare parts ×%d\nRepair supplies ×%d" % [
-		state.controller_load(), State.HOLD, state.ore, state.parts, state.repair_kits
+	cargo.text = "CONTROLLER CARGO   %d / %d\nRaw ore ×%d   ·   Hull ×%d\nSpare parts ×%d   ·   Repair supplies ×%d" % [
+		state.controller_load(), State.HOLD, state.ore, state.hull_cargo, state.parts, state.repair_kits
 	]
 	if phase >= State.Phase.HAULING:
 		var unmined: Dictionary = state.field_remaining_material()
@@ -310,7 +310,7 @@ func refresh() -> void:
 			for worker in state.salvage_workers:
 				if bool(worker["active"]):
 					restored += 1
-			cargo.text += "\n\nASTERION SALVAGE\nWorkers %d / 3  ·  Hull %d / %d\nFeedstock delivered ×%d" % [
+			cargo.text += "\n\nREFINERY ACCESS SECTOR\nRestored workers %d / 3\nHull removed %d / %d  ·  Stored ×%d\nGEN 01  Mining 50%% / Salvage 50%%" % [
 				restored, state.hull_extracted, State.REFINERY_EXPOSURE, state.hull_stock
 			]
 	notice.text = state.notice if state.notice_time > 0 else ""
@@ -322,11 +322,11 @@ func refresh() -> void:
 		research_status.text = "Field Repair complete · Miner 031 online.\nSalvage threshold: %d / 5 deliveries." % mini(5, state.deliveries)
 		if state.salvage_insight_unlocked:
 			research_title.text = "◆ Field Repair ✓   ◆ Salvage ✓"
-			research_status.text = "Salvage unlocked. Three repairable workers detected.\nRecovered hull material: %d / %d units." % [
+			research_status.text = "Only refinery-access plating is authorized.\nHAL can salvage; restored workers choose mining or salvage (50/50).\nHull removed: %d / %d units." % [
 				state.hull_extracted, State.REFINERY_EXPOSURE
 			]
 			if state.refinery_exposed:
-				research_status.text += "\nRefinery exposed; structural recovery follows in Pass 4."
+				research_status.text += "\nRefinery exposed. Other mothership systems remain locked."
 
 func refresh_boot() -> void:
 	var waiting := state.phase == State.Phase.SAFE_MODE
