@@ -869,29 +869,60 @@ func choose_salvage_site(worker: Dictionary) -> bool:
 	return true
 
 func tick_salvage_workers(delta: float) -> void:
+	# These are general-purpose workers. The names 'salvage_workers' and
+	# 'to_hull' survive from Pass 3, but task choice is shared with Miner 031.
 	for i in range(salvage_workers.size()):
 		if not bool(salvage_workers[i]["active"]):
 			continue
 		var worker: Dictionary = salvage_workers[i]
 		var current: Vector2 = worker["position"]
-		var to_hull: bool = worker["to_hull"]
+		var outbound: bool = worker["to_hull"]
 		var cargo: int = worker["cargo"]
 		if current.distance_to(player) > COMMS_RANGE * 0.98:
 			worker["linked"] = false
 			move_salvager(worker, player, delta, i)
 			continue
 		if not bool(worker["linked"]):
-			if current.distance_to(player) > COMMS_RANGE * 0.8:
+			if current.distance_to(player) > COMMS_RANGE * 0.80:
 				move_salvager(worker, player, delta, i)
 				continue
 			worker["linked"] = true
-		if to_hull and hull_extracted >= REFINERY_EXPOSURE:
-			continue # Don't damage the newly uncovered refinery.
-		if to_hull and not choose_salvage_site(worker):
-			continue
-		var site_index: int = worker["site_index"]
-		var site: Vector2 = SALVAGE_SITES[site_index]
-		var target := site if to_hull else STOCKPILE
+		if outbound:
+			if String(worker["task"]) == "idle":
+				if not assign_worker_task(worker, 42 + i):
+					worker["velocity"] = Vector2.ZERO
+					continue
+			if String(worker["task"]) == "hull":
+				if not choose_salvage_site(worker):
+					if not assign_worker_task(worker, 42 + i):
+						worker["velocity"] = Vector2.ZERO
+						continue
+			elif String(worker["task"]) == "ore":
+				var rock: int = worker["rock"]
+				if rock < 0 or rock_remaining(rock) <= 0:
+					var next_rock := OreField.nearest_viable_rock(
+						STOCKPILE, player, COMMS_RANGE, asteroid_mined, int(worker["assignments"])
+					)
+					if next_rock < 0:
+						if not assign_worker_task(worker, 42 + i):
+							worker["velocity"] = Vector2.ZERO
+							continue
+					else:
+						worker["rock"] = next_rock
+						worker["worksite"] = OreField.near_surface(next_rock, STOCKPILE)
+						worker["time"] = 0.0
+		var task: String = worker["task"]
+		var target := STOCKPILE
+		if outbound:
+			if task == "hull":
+				var site_index: int = worker["site_index"]
+				if site_index < 0:
+					continue
+				target = SALVAGE_SITES[site_index]
+			elif task == "ore":
+				target = worker["worksite"]
+			else:
+				continue
 		if target.distance_to(player) > COMMS_RANGE:
 			worker["velocity"] = Vector2.ZERO
 			continue
@@ -901,29 +932,44 @@ func tick_salvage_workers(delta: float) -> void:
 		worker["position"] = target
 		worker["velocity"] = Vector2.ZERO
 		worker["time"] = float(worker["time"]) + delta
-		var duration := HULL_CUT_TIME if to_hull else MINER_UNLOAD_TIME
+		var duration := (HULL_CUT_TIME if task == "hull" else MINER_EXTRACTION_TIME) if outbound else MINER_UNLOAD_TIME
 		if float(worker["time"]) < duration:
 			continue
 		worker["time"] = 0.0
-		if to_hull:
-			var removed := mini(MINER_LOAD_SIZE, mini(REFINERY_EXPOSURE - hull_extracted,
-				SALVAGE_SITE_QUOTA - hull_site_units[site_index]))
+		if outbound:
+			var remaining := SALVAGE_SITE_QUOTA - hull_site_units[int(worker["site_index"])] if task == "hull" else rock_remaining(int(worker["rock"]))
+			if remaining <= 0:
+				continue
+			var removed := mini(MINER_LOAD_SIZE, remaining)
+			if task == "hull":
+				removed = extract_hull(int(worker["site_index"]), removed)
+				worker["cargo_kind"] = "hull"
+			else:
+				var material := extract_rock(int(worker["rock"]), removed)
+				worker["cargo_fe"] = int(material["Fe"])
+				worker["cargo_cu"] = int(material["Cu"])
+				worker["cargo_si"] = int(material["Si"])
+				worker["cargo_kind"] = "ore"
+			worker["cargo"] = removed
 			if removed <= 0:
 				continue
-			hull_extracted += removed
-			hull_site_units[site_index] += removed
-			worker["cargo"] = removed
 			worker["to_hull"] = false
-			if hull_extracted >= REFINERY_EXPOSURE and not refinery_exposed:
-				refinery_exposed = true
-				report("Damaged refinery uncovered · Salvage paused to protect it")
 		else:
-			hull_stock += cargo
-			salvage_deliveries += 1
+			if String(worker["cargo_kind"]) == "hull":
+				hull_stock += cargo
+				salvage_deliveries += 1
+			else:
+				stock_ore += cargo
+				stock_fe += int(worker["cargo_fe"])
+				stock_cu += int(worker["cargo_cu"])
+				stock_si += int(worker["cargo_si"])
+				deliveries += 1
 			worker["cargo"] = 0
+			worker["cargo_fe"] = 0
+			worker["cargo_cu"] = 0
+			worker["cargo_si"] = 0
 			worker["to_hull"] = true
-			if salvage_deliveries == 1:
-				report("Asterion hull feedstock delivered to intake cache")
+			assign_worker_task(worker, 42 + i)
 		worker["leg"] = int(worker["leg"]) + 1
 		worker["clock"] = 0.0
 
