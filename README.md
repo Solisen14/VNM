@@ -12,6 +12,8 @@ A Godot 4 prototype about five surviving control drones. The project opens at th
 
 Choose your designation and follow the systems as they come online. Use **Q / E** or the mouse wheel to zoom, **A / D** to turn, and **W / S** for forward and reverse thrust. **Left-click** a waypoint to fly there under autopilot. **Right-click** a contact to approach and carry out its available action. Use **Frame signals** to see the search area again and **Follow controller** to return the camera to your ship.
 
+Tutorial briefings dock as live objectives near the upper-left of the map. Once Field Repair is available, press **I** for the Insight Tree or **C** for the Cargo Inventory. Press **Esc** to close either window.
+
 The controller charts the space along its flight path. Miner 031 can work through the fog and report its cargo without charting terrain.
 
 Scan the ore field, damaged miner and wreck of the MCV Asterion. **Field Repair** appears in a first-Insight pop-up. Press **I** or use the pop-up button to open the Insights panel. Collect 3 ore from the field and one spare part from each of the two wrecked drones, then return to the miner and repair it. **Miner 031 automatically selects a worksite and starts mining as soon as it is repaired.** You do not assign individual ore jobs.
