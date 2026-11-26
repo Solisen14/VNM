@@ -37,6 +37,8 @@ var inventory_button: Button
 var insight_card: PanelContainer
 var insight_tree_nodes: Array[Label] = []
 var tutorial_briefing := false
+var placing_refinery := false
+var placement_button: Button
 var system_label: Label
 var prompt: Label
 var contact_details: Label
@@ -106,6 +108,7 @@ func _ready() -> void:
 	phase_heading.add_theme_font_override("font", FONT)
 	objective_docked.add_child(phase_heading)
 	prompt = paragraph(objective_docked, 16, PALE)
+	placement_button = make_button(objective_docked, "Choose refinery site", toggle_refinery_placement)
 	contact_details = paragraph(side, 14, MUTED)
 	work_panel = VBoxContainer.new()
 	side.add_child(work_panel)
@@ -172,7 +175,9 @@ func build_insight_popup(view: Control) -> void:
 func open_first_insight() -> void:
 	var start := insight_card.get_global_rect()
 	if not tutorial_briefing:
-		if state.salvage_insight_ready and not state.salvage_insight_unlocked:
+		if state.refinery_phase == State.RefineryPhase.EXPOSED:
+			state.begin_refinery_recovery()
+		elif state.salvage_insight_ready and not state.salvage_insight_unlocked:
 			state.unlock_salvage()
 		inventory.hide()
 		research.show()
@@ -301,6 +306,10 @@ func _physics_process(delta: float) -> void:
 		show_briefing("SECOND INSIGHT / SALVAGE", "Why is the ore stockpiling here?",
 			"The intake is still receiving ore. The refinery must be buried under the hull. Three dormant workers are close enough to repair.",
 			"Open Insight Tree [I]", false)
+	if state.refinery_phase == State.RefineryPhase.EXPOSED and not insight_popup.visible:
+		show_briefing("THIRD INSIGHT / REFINING & LOGISTICS", "I can recover the refinery.",
+			"The housing is damaged, but the assembly is intact. The salvagers can release its restraints and tow it clear. Then I’ll choose where to anchor it.",
+			"Queue recovery [I]", false)
 	refresh()
 	map.queue_redraw()
 
@@ -315,6 +324,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				toggle_research()
 			elif inventory.visible:
 				toggle_inventory()
+			elif placing_refinery:
+				toggle_refinery_placement()
 		elif not (insight_popup.visible or research.visible or inventory.visible):
 			if event.physical_keycode == KEY_Q:
 				map.set_zoom(1.0 / 1.10, map.size * 0.5)
@@ -328,11 +339,22 @@ func accept_designation() -> void:
 
 func left_command(point: Vector2) -> void:
 	if not (insight_popup.visible or research.visible or inventory.visible) and state.phase >= State.Phase.WAYFINDING:
+		if placing_refinery:
+			if state.place_refinery(point):
+				placing_refinery = false
+			refresh()
+			return
 		state.plot_move(point)
 		map.following = true
 
+func toggle_refinery_placement() -> void:
+	if state.refinery_phase != State.RefineryPhase.STAGED:
+		return
+	placing_refinery = not placing_refinery
+	refresh()
+
 func right_command(contact: String) -> void:
-	if insight_popup.visible or research.visible or inventory.visible or not state.is_visible(contact):
+	if placing_refinery or insight_popup.visible or research.visible or inventory.visible or not state.is_visible(contact):
 		return
 	selected = contact
 	var action := state.command_for(contact)
@@ -356,6 +378,7 @@ func toggle_inventory() -> void:
 
 func restart() -> void:
 	state = State.new()
+	placing_refinery = false
 	selected = ""
 	map.reset_view()
 	designation.clear()
@@ -403,8 +426,11 @@ func refresh() -> void:
 			prompt.text = "Repair a dormant salvager"
 		else:
 			prompt.text = "Collect repair supplies at the intake\nRequires 2 Fe + 1 Cu"
+	placement_button.visible = state.refinery_phase == State.RefineryPhase.STAGED
+	placement_button.text = "Cancel preview [Esc]" if placing_refinery else "Choose refinery site"
 	if state.refinery_exposed:
-		prompt.text = "Refinery exposed  ·  %d / %d hull" % [state.hull_extracted, State.REFINERY_EXPOSURE]
+		phase_heading.text = "REFINING & LOGISTICS"
+		prompt.text = refinery_objective()
 	var controls := "Scroll / Q and E to zoom"
 	if phase >= State.Phase.FLIGHT:
 		controls += "   ·   A/D turn   ·   W/S thrust"
@@ -455,7 +481,11 @@ func refresh() -> void:
 	notice.visible = not notice.text.is_empty()
 	insight_tree_nodes[0].text = "Field Repair  ·  %s" % ("Complete" if phase >= State.Phase.HAULING else "Available")
 	insight_tree_nodes[1].text = "Salvage  ·  %s" % ("Unlocked" if state.salvage_insight_unlocked else "Requires 5 miner deliveries")
-	insight_tree_nodes[2].text = "Refining & Logistics  ·  %s" % ("Refinery exposed" if state.refinery_exposed else "Locked")
+	insight_tree_nodes[2].text = "Refining & Logistics  ·  Locked"
+	if state.refinery_phase == State.RefineryPhase.EXPOSED:
+		insight_tree_nodes[2].text = "Refining & Logistics  ·  Available"
+	elif state.refinery_phase >= State.RefineryPhase.DISCONNECTING:
+		insight_tree_nodes[2].text = "Refining & Logistics  ·  Unlocked"
 	insight_tree_nodes[3].text = "Component Manufacturing  ·  Locked"
 	insight_tree_nodes[4].text = "Drone Construction  ·  Locked"
 	research_status.text = "Ore   %d / %d\nSpare parts   %d / %d\nRepair the damaged miner" % [state.ore, State.ORE_REQUIRED, state.parts, State.PARTS_REQUIRED]
@@ -466,7 +496,29 @@ func refresh() -> void:
 				state.hull_extracted, State.REFINERY_EXPOSURE
 			]
 			if state.refinery_exposed:
-				research_status.text += "\nRefinery exposed. Structural recovery is still locked."
+				research_status.text += "\n" + refinery_objective()
+
+func refinery_objective() -> String:
+	if state.refinery_link_paused:
+		return "Recovery paused · Bring HAL within link range"
+	match state.refinery_phase:
+		State.RefineryPhase.EXPOSED:
+			return "Review the refinery Insight"
+		State.RefineryPhase.DISCONNECTING:
+			if state.refinery_work_time <= 0.0:
+				return "Salvagers assembling at the refinery bay"
+			return "Disconnect restraints  ·  %d%%" % floori(100.0 * state.refinery_work_time / State.REFINERY_DISCONNECT_TIME)
+		State.RefineryPhase.EXTRACTING:
+			return "Salvagers towing the refinery clear of the hull"
+		State.RefineryPhase.STAGED:
+			return "Left-click a surveyed site above the hull" if placing_refinery else "Refinery clear · Choose an installation site"
+		State.RefineryPhase.HAULING:
+			return "Salvagers towing the refinery to its new site"
+		State.RefineryPhase.ANCHORING:
+			return "Anchor the refinery  ·  %d%%" % floori(100.0 * state.refinery_work_time / State.REFINERY_ANCHOR_TIME)
+		State.RefineryPhase.PLACED:
+			return "Refinery placed · Damaged and offline"
+	return ""
 
 func refresh_boot() -> void:
 	var waiting := state.phase == State.Phase.SAFE_MODE

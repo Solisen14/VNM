@@ -51,8 +51,34 @@ func verify_insight() -> void:
 	escape.pressed = true
 	game._unhandled_key_input(escape)
 	assert(not game.inventory.visible, "Escape did not close cargo")
+	game.state.refinery_exposed = true
+	game.state.refinery_phase = State.RefineryPhase.EXPOSED
+	game._physics_process(0.01)
+	assert(game.insight_popup.visible and game.insight_headline.text.contains("recover the refinery"))
+	game._unhandled_key_input(insight_key)
+	assert(game.state.refinery_phase == State.RefineryPhase.DISCONNECTING)
+	game._unhandled_key_input(escape)
+	game.state.refinery_phase = State.RefineryPhase.STAGED
+	game.state.refinery_position = State.REFINERY_STAGING
+	game.refresh()
+	assert(game.placement_button.visible)
+	game.placement_button.pressed.emit()
+	assert(game.placing_refinery)
+	var site := State.REFINERY_STAGING + Vector2(240, -130)
+	game.state.player = site + Vector2(30, 0)
+	game.state.chart_position()
+	game.map.queue_redraw()
+	await process_frame
+	game.left_command(State.REFINERY_BAY)
+	assert(game.placing_refinery and game.state.refinery_phase == State.RefineryPhase.STAGED)
+	game._unhandled_key_input(escape)
+	assert(not game.placing_refinery)
+	game.placement_button.pressed.emit()
+	game.left_command(site)
+	assert(not game.placing_refinery and game.state.refinery_phase == State.RefineryPhase.HAULING)
+	assert(not game.state.has_destination, "Placement also issued a flight waypoint")
 	game.restart()
 	assert(not game.research.visible and not game.inventory.visible and not game.active_hud.visible,
 		"Restart left a gameplay overlay open")
-	print("PASS: VNM Pass 3 paused Insight HUD and three new worker signals")
+	print("PASS: VNM Insight windows, objective HUD and refinery placement controls")
 	quit(0)
