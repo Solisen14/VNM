@@ -2,6 +2,7 @@ extends RefCounted
 
 const WorkerMotion = preload("res://worker_motion.gd")
 const OreField = preload("res://ore_field.gd")
+const Industry = preload("res://industrial_tutorial.gd")
 
 enum Phase { SAFE_MODE, DIAGNOSTICS, SENSORS, FLIGHT, WAYFINDING, COMMS, CONTACTS, FIELD_REPAIR, ORDERS, HAULING }
 enum RefineryPhase { BURIED, EXPOSED, DISCONNECTING, EXTRACTING, STAGED, HAULING, ANCHORING, PLACED }
@@ -12,8 +13,10 @@ const HOLD := 5
 const GRID := 32
 const SENSOR_RANGE := 245.0
 const INTERACT_RANGE := 82.0
-const TURN_SPEED := 1.42
-const ACCELERATION := 75.0
+const TURN_SPEED := 1.12
+const ACCELERATION := 26.0
+const DRIFT_DECELERATION := 8.0
+const ORE_COLLECTION_GOAL := 10
 const MAX_SPEED := 145.0
 const MINER_SPEED := 110.0
 const MINER_ACCELERATION := 70.0
@@ -29,8 +32,12 @@ const MINER_EXTRACTION_TIME := 8.0
 const MINER_UNLOAD_TIME := 5.0
 # Visual pixels are batches of recoverable matter, not individual simulated atoms.
 const FIELD_RESERVE := OreField.TOTAL_UNITS
-const HULL_RESERVE := 48
+# Only the refinery-access hull sector is authorized by the Salvage Insight.
+# Other parts of Asterion stay intact until their own future Insights.
 const REFINERY_EXPOSURE := 12
+const HULL_RESERVE := REFINERY_EXPOSURE
+const WORKER_MINING_WEIGHT := 0.50
+const WORKER_SALVAGE_WEIGHT := 0.50
 const SALVAGE_SITE_QUOTA := 4
 const SALVAGE_CONTACTS := ["salvage_1", "salvage_2", "salvage_3"]
 const SALVAGE_SPAWNS := [Vector2(1040, 560), Vector2(1225, 565), Vector2(1350, 430)]
@@ -57,7 +64,9 @@ const WORK_TIMES := {
 	"Repair mining drone": 7.0,
 	"Unload raw ore": 3.5,
 	"Collect repair supplies": 4.0,
-	"Repair salvage drone": 7.0,
+	"Repair worker": 7.0,
+	"Salvage refinery access plating": 12.0,
+	"Unload hull feedstock": 3.5,
 }
 const WORK_LABELS := {
 	"Approach and scan": "Scanning contact",
@@ -66,7 +75,9 @@ const WORK_LABELS := {
 	"Repair mining drone": "Repairing miner",
 	"Unload raw ore": "Unloading raw ore",
 	"Collect repair supplies": "Collecting repair supplies",
-	"Repair salvage drone": "Restoring salvage worker",
+	"Repair worker": "Restoring worker",
+	"Salvage refinery access plating": "Cutting authorized hull sector",
+	"Unload hull feedstock": "Unloading recovered hull",
 }
 const WORLD := Rect2(-2200, -1550, 4700, 3450)
 const FIELD := Vector2(530, -215)
@@ -80,6 +91,7 @@ const REFINERY_INTAKE := Vector2(1090, 66)
 const CONTACTS := ["ore", "miner", "wreck", "parts_a", "parts_b", "stockpile", "salvage_1", "salvage_2", "salvage_3"]
 const PRIMARY := ["ore", "miner", "wreck"]
 
+var contacts := CONTACTS + Industry.CONTACTS
 var phase := Phase.SAFE_MODE
 var name_text := ""
 var phase_time := 0.0
@@ -98,13 +110,18 @@ var scanned := {}
 var salvaged := {}
 var ore := 0
 var parts := 0
+var hull_cargo := 0
 var drill_loads := 6
 var field_extracted := 0
 var hull_extracted := 0
 var hull_stock := 0
 var salvage_deliveries := 0
+# Miner 031 also follows the shared generation's mining/salvage priorities.
 var salvage_mode := false
+var miner_hull_site := -1
+var miner_assignments := 0
 var miner_cargo_type := "ore"
+var industry := Industry.new()
 var refinery_exposed := false
 var refinery_phase := RefineryPhase.BURIED
 var refinery_position := REFINERY_BAY
@@ -120,6 +137,7 @@ var miner_position := MINER
 var miner_heading := -0.25
 var miner_cargo := 0
 var stock_ore := 0
+var ore_collected := 0
 var deliveries := 0
 var to_field := true
 var miner_work_time := 0.0
@@ -157,6 +175,7 @@ var spent_si := 0
 var repair_kits := 0
 var manual_rock := -1
 var manual_worksite := Vector2.ZERO
+var manual_hull_site := -1
 var salvage_insight_unlocked := false
 var salvage_workers: Array[Dictionary] = []
 var hull_site_units := PackedInt32Array([0, 0, 0])
@@ -175,6 +194,14 @@ func _init() -> void:
 			"index": i,
 			"site_index": i,
 			"to_hull": true,
+			"task": "idle",
+			"rock": -1,
+			"worksite": Vector2.ZERO,
+			"cargo_kind": "ore",
+			"cargo_fe": 0,
+			"cargo_cu": 0,
+			"cargo_si": 0,
+			"assignments": i + 1,
 			"time": 0.0,
 			"cargo": 0,
 			"linked": true
@@ -194,7 +221,7 @@ func unlock_salvage() -> void:
 	report("SALVAGE UNLOCKED · Three dormant workers detected near the hull")
 
 func controller_load() -> int:
-	return ore + parts + repair_kits * 3
+	return ore + hull_cargo + parts + repair_kits * 3 + industry.hal_load()
 
 func can_collect_repair_supplies() -> bool:
 	return salvage_insight_unlocked and has_worker_capacity() and repair_kits == 0 and controller_load() + 3 <= HOLD and stock_fe >= 2 and stock_cu >= 1
@@ -208,8 +235,12 @@ func manual_ore_destination() -> Vector2:
 	return manual_worksite
 
 func action_position(contact: String, action: String) -> Vector2:
+	if action == "Extract rich ore" and industry.rich_sample_valid:
+		return industry.rich_sample_surface
 	if contact == "ore" and action == "Extract ore sample" and manual_rock >= 0:
 		return manual_worksite
+	if contact == "wreck" and action == "Salvage refinery access plating" and manual_hull_site >= 0:
+		return SALVAGE_SITES[manual_hull_site]
 	return position_of(contact)
 
 func has_worker_capacity() -> bool:
@@ -220,11 +251,84 @@ func link_status() -> String:
 		return "STANDBY"
 	if miner_position.distance_to(player) > COMMS_RANGE:
 		return "RECONNECTING"
-	if to_field and miner_worksite.distance_to(player) > COMMS_RANGE:
+	var current_worksite: Vector2 = SALVAGE_SITES[miner_hull_site] if salvage_mode and miner_hull_site >= 0 else miner_worksite
+	if to_field and current_worksite.distance_to(player) > COMMS_RANGE:
 		return "WORKSITE OUT OF RANGE"
 	if STOCKPILE.distance_to(player) > COMMS_RANGE:
 		return "STOCKPILE OUT OF RANGE"
 	return "CONNECTED"
+
+# Shared 50/50 generation priorities. Before the Insight, only mining is
+# eligible. The worker picks its next task at the completion of a delivery.
+func pick_autonomous_task(identity: int, assignment: int, origin: Vector2) -> String:
+	var rock := OreField.nearest_viable_rock(
+		STOCKPILE, player, COMMS_RANGE, asteroid_mined, assignment
+	)
+	var mining_possible := rock >= 0
+	var salvage_possible := closest_open_salvage_site(origin) >= 0
+	if not mining_possible and not salvage_possible:
+		return "idle"
+	if not salvage_possible:
+		return "ore"
+	if not mining_possible:
+		return "hull"
+	var entropy := sin(float(identity) * 78.233 + float(assignment) * 12.9898) * 43758.5453
+	var roll := fposmod(entropy, 1.0)
+	return "ore" if roll < WORKER_MINING_WEIGHT / (WORKER_MINING_WEIGHT + WORKER_SALVAGE_WEIGHT) else "hull"
+
+func closest_open_salvage_site(origin: Vector2) -> int:
+	if not salvage_insight_unlocked or refinery_exposed or hull_extracted >= REFINERY_EXPOSURE:
+		return -1
+	var site := -1
+	var nearest := INF
+	for i in range(SALVAGE_SITES.size()):
+		if hull_site_units[i] >= SALVAGE_SITE_QUOTA:
+			continue
+		if SALVAGE_SITES[i].distance_to(player) > COMMS_RANGE:
+			continue
+		var distance := origin.distance_squared_to(SALVAGE_SITES[i])
+		if distance < nearest:
+			nearest = distance
+			site = i
+	return site
+
+func assign_miner_task() -> bool:
+	miner_assignments += 1
+	var task := pick_autonomous_task(31, miner_assignments, miner_position)
+	salvage_mode = task == "hull"
+	if task == "hull":
+		miner_hull_site = closest_open_salvage_site(miner_position)
+		miner_work_time = 0.0
+		return miner_hull_site >= 0
+	if task == "ore":
+		miner_rock = -1
+		miner_work_time = 0.0
+		return choose_mining_site()
+	miner_hull_site = -1
+	miner_rock = -1
+	miner_work_time = 0.0
+	return false
+
+func assign_worker_task(worker: Dictionary, identity: int) -> bool:
+	worker["assignments"] = int(worker["assignments"]) + 1
+	var task := pick_autonomous_task(identity, int(worker["assignments"]), worker["position"])
+	worker["task"] = task
+	worker["to_hull"] = true # Outbound leg to the chosen material.
+	worker["time"] = 0.0
+	if task == "hull":
+		var site := closest_open_salvage_site(worker["position"])
+		worker["site_index"] = site
+		return site >= 0
+	if task == "ore":
+		var rock := OreField.nearest_viable_rock(
+			STOCKPILE, player, COMMS_RANGE, asteroid_mined, int(worker["assignments"])
+		)
+		worker["rock"] = rock
+		if rock < 0:
+			return false
+		worker["worksite"] = OreField.near_surface(rock, STOCKPILE)
+		return true
+	return false
 
 func rock_remaining(index: int) -> int:
 	return maxi(0, OreField.rock_capacity(index) - asteroid_mined[index])
@@ -244,7 +348,7 @@ func extract_rock(index: int, count: int) -> Dictionary:
 	return minerals
 
 func choose_mining_site() -> bool:
-	if miner_rock >= 0 and rock_remaining(miner_rock) > 0:
+	if miner_rock >= 0 and rock_remaining(miner_rock) > 0 and miner_worksite.distance_to(player) <= COMMS_RANGE:
 		return true
 	miner_selection_round += 1
 	miner_rock = OreField.nearest_viable_rock(
@@ -312,6 +416,7 @@ func tick(delta: float, turn: float, thrust: float) -> void:
 		if salvage_insight_unlocked:
 			tick_salvage_workers(delta)
 			tick_refinery_recovery(delta)
+			industry.tick(self, delta)
 
 func fly(delta: float, turn: float, thrust: float) -> void:
 	if turn != 0.0 or thrust != 0.0:
@@ -323,7 +428,7 @@ func fly(delta: float, turn: float, thrust: float) -> void:
 		turned = turned or turn != 0
 		thrust_used = thrust_used or thrust != 0
 	var desired_velocity := Vector2.from_angle(heading) * thrust * MAX_SPEED
-	var acceleration := ACCELERATION if thrust != 0.0 else ACCELERATION * 0.85
+	var acceleration := ACCELERATION if thrust != 0.0 or has_destination else DRIFT_DECELERATION
 	if has_destination:
 		var offset := destination - player
 		var distance := offset.length()
@@ -333,7 +438,7 @@ func fly(delta: float, turn: float, thrust: float) -> void:
 			var alignment := maxf(0, cos(angle_difference(heading, desired_heading)))
 			var desired_speed := minf(MAX_SPEED, sqrt(2 * ACCELERATION * 0.7 * maxf(0, distance - 12)))
 			desired_velocity = Vector2.from_angle(heading) * desired_speed * alignment
-		if distance <= 24 and velocity.length() <= 25:
+		if distance <= 24 and velocity.length() <= 14:
 			arrive()
 			desired_velocity = Vector2.ZERO
 	var before := player
@@ -382,6 +487,8 @@ func arrive() -> void:
 			start_work(contact, action)
 
 func position_of(contact: String) -> Vector2:
+	if contact in Industry.CONTACTS:
+		return industry.position_of(contact)
 	match contact:
 		"ore": return FIELD
 		"miner": return miner_position
@@ -397,6 +504,8 @@ func position_of(contact: String) -> Vector2:
 func is_visible(contact: String) -> bool:
 	if phase < Phase.CONTACTS:
 		return false
+	if contact in Industry.CONTACTS:
+		return industry.visible(contact)
 	if contact in PRIMARY:
 		return true
 	if contact == "stockpile":
@@ -408,11 +517,13 @@ func is_visible(contact: String) -> bool:
 func command_for(contact: String) -> String:
 	if not is_visible(contact):
 		return ""
+	if contact in Industry.CONTACTS:
+		return industry.command(contact, HOLD - controller_load())
 	if contact in PRIMARY and not scanned.has(contact):
 		return "Approach and scan"
 	match contact:
 		"ore":
-			if phase >= Phase.FIELD_REPAIR and controller_load() < HOLD and field_extracted < FIELD_RESERVE:
+			if phase >= Phase.FIELD_REPAIR and controller_load() < HOLD and field_extracted < FIELD_RESERVE and (phase != Phase.FIELD_REPAIR or ore < ORE_REQUIRED):
 				return "Extract ore sample"
 		"parts_a", "parts_b":
 			return "Recover spare part" if controller_load() < HOLD else ""
@@ -422,20 +533,69 @@ func command_for(contact: String) -> String:
 		"stockpile":
 			if ore > 0:
 				return "Unload raw ore"
+			if hull_cargo > 0:
+				return "Unload hull feedstock"
 			if can_collect_repair_supplies():
 				return "Collect repair supplies"
+		"wreck":
+			# The only salvageable area in this Insight is the small refinery
+			# access sector. No generic salvage permission for the mothership.
+			if salvage_insight_unlocked and not refinery_exposed and controller_load() < HOLD:
+				if closest_open_salvage_site(player) >= 0:
+					return "Salvage refinery access plating"
 	var index := salvage_index(contact)
 	if index >= 0 and salvage_insight_unlocked and not bool(salvage_workers[index]["active"]):
 		if repair_kits > 0 and has_worker_capacity():
-			return "Repair salvage drone"
+			return "Repair worker"
+	return ""
+
+func interaction_hint(contact: String) -> String:
+	# Right-click guidance remains available even when the action is blocked.
+	if contact in Industry.CONTACTS:
+		return industry.interaction_hint(contact, HOLD - controller_load())
+	if contact == "ore" and phase == Phase.FIELD_REPAIR and ore >= ORE_REQUIRED:
+		return "Field Repair ore secured. Recover the two spare parts."
+	if contact == "ore" and controller_load() >= HOLD:
+		return "HAL's hold is full. Right-click the Collection Point to unload before mining again."
+	if contact == "stockpile" and phase >= Phase.HAULING:
+		if ore > 0 or hull_cargo > 0:
+			return "Right-click to unload HAL's materials. Click again to collect repair supplies."
+		if salvage_insight_unlocked and repair_kits == 0:
+			if not has_worker_capacity():
+				return "Coordination limit reached: %d active drones." % DRONE_CAPACITY
+			if controller_load() + 3 > HOLD:
+				return "Repair supplies take 3 cargo spaces. Free space in HAL's hold first."
+			if stock_fe < 2 or stock_cu < 1:
+				return "Repair supplies require 2 Fe and 1 Cu at the Collection Point. Continue mining."
+			return "Right-click here to collect repair supplies (2 Fe + 1 Cu), then visit a damaged worker."
+	var index := salvage_index(contact)
+	if index >= 0 and salvage_insight_unlocked and not bool(salvage_workers[index]["active"]):
+		if not has_worker_capacity():
+			return "HAL has reached its %d-drone coordination limit." % DRONE_CAPACITY
+		if repair_kits > 0:
+			return "Ready to repair. Right-click this worker to install the supplies."
+		if controller_load() + 3 > HOLD:
+			return "Repair needs 2 Fe + 1 Cu. First unload HAL's cargo at the Collection Point."
+		if stock_fe < 2 or stock_cu < 1:
+			return "Repair needs 2 Fe + 1 Cu. Mine more material and deposit it at the Collection Point."
+		return "Repair needs 2 Fe + 1 Cu. Right-click the Collection Point to collect supplies, then return."
 	return ""
 
 func issue(contact: String) -> void:
 	var action := command_for(contact)
-	if action.is_empty() or contact == work_contact or contact == pending_contact:
+	if action.is_empty():
+		var hint := interaction_hint(contact)
+		if not hint.is_empty():
+			report(hint)
+		return
+	if contact == work_contact or contact == pending_contact:
 		return
 	if contact == "ore" and action == "Extract ore sample":
 		manual_ore_destination()
+	if action == "Extract rich ore":
+		industry.select_rich_rock(player)
+	if contact == "wreck" and action == "Salvage refinery access plating":
+		manual_hull_site = closest_open_salvage_site(player)
 	if player.distance_to(action_position(contact, action)) <= INTERACT_RANGE and velocity.length() <= 25:
 		has_destination = false
 		pending_contact = ""
@@ -462,20 +622,29 @@ func tick_work(delta: float) -> void:
 	if player.distance_to(action_position(work_contact, work_action)) > INTERACT_RANGE or command_for(work_contact) != work_action:
 		cancel_work()
 		return
+	if work_action == "Salvage refinery access plating" and (manual_hull_site < 0 or hull_site_units[manual_hull_site] >= SALVAGE_SITE_QUOTA):
+		cancel_work()
+		return
 	work_time += delta
-	if work_time >= float(WORK_TIMES[work_action]):
+	if work_time >= action_duration(work_action):
 		var contact := work_contact
 		var action := work_action
 		cancel_work()
 		execute(contact, action)
 
+func action_duration(action: String) -> float:
+	return float(WORK_TIMES.get(action, Industry.TIMES.get(action, 1.0)))
+
 func work_fraction() -> float:
 	if work_action.is_empty():
 		return 0.0
-	return minf(work_time / float(WORK_TIMES[work_action]), 1.0)
+	return minf(work_time / action_duration(work_action), 1.0)
 
 func execute(contact: String, action: String) -> void:
 	if command_for(contact) != action:
+		return
+	if contact in Industry.CONTACTS:
+		industry.execute(self, action)
 		return
 	match action:
 		"Approach and scan":
@@ -486,6 +655,8 @@ func execute(contact: String, action: String) -> void:
 				report("Insight recorded · Field Repair")
 		"Extract ore sample":
 			var amount := mini(3, HOLD - controller_load())
+			if phase == Phase.FIELD_REPAIR:
+				amount = mini(amount, ORE_REQUIRED - ore)
 			if manual_rock < 0 or rock_remaining(manual_rock) <= 0:
 				manual_rock = OreField.rock_for_manual_sample(player, asteroid_mined)
 			if manual_rock < 0:
@@ -519,25 +690,34 @@ func execute(contact: String, action: String) -> void:
 			parts -= PARTS_REQUIRED
 			active_drones += 1
 			set_phase(Phase.HAULING)
-			choose_mining_site()
+			assign_miner_task()
 			report("Field Repair complete · Miner 031 autonomously mining")
 		"Unload raw ore":
-			stock_ore += ore
-			stock_fe += cargo_fe
-			stock_cu += cargo_cu
-			stock_si += cargo_si
-			report("HAL unloaded %d raw units at the intake cache" % ore)
+			deposit_ore(cargo_fe, cargo_cu, cargo_si)
+			report("HAL deposited %d raw units at the Collection Point" % ore)
 			ore = 0
 			cargo_fe = 0
 			cargo_cu = 0
 			cargo_si = 0
+		"Unload hull feedstock":
+			hull_stock += hull_cargo
+			report("HAL deposited %d hull units at the Collection Point" % hull_cargo)
+			hull_cargo = 0
+		"Salvage refinery access plating":
+			if manual_hull_site < 0:
+				return
+			var cut := extract_hull(manual_hull_site, mini(3, HOLD - controller_load()))
+			hull_cargo += cut
+			if cut > 0 and not refinery_exposed:
+				report("HAL recovered %d refinery-access hull units" % cut)
+			manual_hull_site = -1
 		"Collect repair supplies":
 			stock_ore -= 3
 			stock_fe -= 2
 			stock_cu -= 1
 			repair_kits += 1
 			report("Repair supplies secured · 2 Fe + 1 Cu")
-		"Repair salvage drone":
+		"Repair worker":
 			var index := salvage_index(contact)
 			if index < 0 or repair_kits == 0 or not has_worker_capacity():
 				return
@@ -546,9 +726,22 @@ func execute(contact: String, action: String) -> void:
 			spent_cu += 1
 			active_drones += 1
 			salvage_workers[index]["active"] = true
-			report("%s restored · Autonomous hull salvage online" % contact_name(contact))
+			assign_worker_task(salvage_workers[index], 42 + index)
+			report("%s restored · Autonomous worker online" % contact_name(contact))
+
+func deposit_ore(fe: int, cu: int, si: int) -> void:
+	var amount := fe + cu + si
+	stock_ore += amount
+	stock_fe += fe
+	stock_cu += cu
+	stock_si += si
+	ore_collected += amount
+	if ore_collected >= ORE_COLLECTION_GOAL:
+		salvage_insight_ready = true
 
 func contact_name(contact: String) -> String:
+	if contact in Industry.CONTACTS:
+		return industry.contact_name(contact)
 	match contact:
 		"ore": return "Depleted Ore Field" if scanned.has(contact) else "Contact 01"
 		"miner":
@@ -558,16 +751,17 @@ func contact_name(contact: String) -> String:
 		"wreck": return "MCV Asterion" if scanned.has(contact) else "Contact 03"
 		"parts_a": return "Wrecked drone A"
 		"parts_b": return "Wrecked drone B"
-		"stockpile": return "Asterion intake cache"
+		"stockpile": return "Collection Point"
 	var index := salvage_index(contact)
 	if index >= 0:
-		return "Salvager %03d" % [42 + index] if bool(salvage_workers[index]["active"]) else "Damaged salvager %03d" % [42 + index]
+		return "Worker %03d" % [42 + index] if bool(salvage_workers[index]["active"]) else "Damaged worker %03d" % [42 + index]
 	return "No contact selected"
 
 func tick_miner(delta: float) -> void:
-	# The worker remains a link-dependent autonomous agent. If HAL flies off,
-	# recover the signal before continuing the existing task.
-	if miner_position.distance_to(player) > COMMS_RANGE * 0.98:
+	# The original miner follows the same shared job selection rules as
+	# subsequently restored drones. The first five jobs are mining because
+	# the Salvage Insight has not yet been unlocked.
+	if miner_position.distance_to(player) > COMMS_RANGE:
 		miner_linked = false
 		fly_miner_to(player, delta)
 		return
@@ -576,10 +770,22 @@ func tick_miner(delta: float) -> void:
 			fly_miner_to(player, delta)
 			return
 		miner_linked = true
-	if to_field and not salvage_mode and not choose_mining_site():
-		miner_velocity = miner_velocity.move_toward(Vector2.ZERO, MINER_ACCELERATION * delta)
-		return
-	var source := HULL_WORKSITE if salvage_mode else miner_worksite
+	if to_field:
+		if salvage_mode:
+			if miner_hull_site < 0 or hull_site_units[miner_hull_site] >= SALVAGE_SITE_QUOTA or Vector2(SALVAGE_SITES[miner_hull_site]).distance_to(player) > COMMS_RANGE:
+				miner_hull_site = closest_open_salvage_site(miner_position)
+				miner_work_time = 0.0
+				if miner_hull_site < 0 and not assign_miner_task():
+					miner_velocity = miner_velocity.move_toward(Vector2.ZERO, MINER_ACCELERATION * delta)
+					return
+		else:
+			if miner_rock < 0 or rock_remaining(miner_rock) <= 0 or miner_worksite.distance_to(player) > COMMS_RANGE:
+				miner_rock = -1
+				miner_work_time = 0.0
+				if not choose_mining_site() and not assign_miner_task():
+					miner_velocity = miner_velocity.move_toward(Vector2.ZERO, MINER_ACCELERATION * delta)
+					return
+	var source: Vector2 = SALVAGE_SITES[miner_hull_site] if salvage_mode else miner_worksite
 	var target := source if to_field else STOCKPILE
 	if target.distance_to(player) > COMMS_RANGE:
 		miner_velocity = miner_velocity.move_toward(Vector2.ZERO, MINER_ACCELERATION * delta)
@@ -592,10 +798,9 @@ func tick_miner(delta: float) -> void:
 	miner_velocity = Vector2.ZERO
 	miner_speed = 0.0
 	if to_field:
-		var remaining := HULL_RESERVE - hull_extracted if salvage_mode else rock_remaining(miner_rock)
+		var remaining := SALVAGE_SITE_QUOTA - hull_site_units[miner_hull_site] if salvage_mode else rock_remaining(miner_rock)
 		if remaining <= 0:
-			if not salvage_mode:
-				miner_rock = -1
+			miner_work_time = 0.0
 			return
 		miner_work_time += delta
 		var duration := HULL_CUT_TIME if salvage_mode else MINER_EXTRACTION_TIME
@@ -604,17 +809,16 @@ func tick_miner(delta: float) -> void:
 		miner_work_time = 0.0
 		miner_cargo = mini(MINER_LOAD_SIZE, remaining)
 		if salvage_mode:
-			hull_extracted += miner_cargo
+			miner_cargo = extract_hull(miner_hull_site, miner_cargo)
 			miner_cargo_type = "hull"
-			if hull_extracted >= 9 and not refinery_exposed:
-				refinery_exposed = true
-				report("Asterion subsystem exposed · Damaged refinery assembly")
 		else:
 			var minerals := extract_rock(miner_rock, miner_cargo)
 			miner_fe = int(minerals["Fe"])
 			miner_cu = int(minerals["Cu"])
 			miner_si = int(minerals["Si"])
 			miner_cargo_type = "ore"
+		if miner_cargo <= 0:
+			return
 	else:
 		miner_work_time += delta
 		if miner_work_time < MINER_UNLOAD_TIME:
@@ -623,19 +827,11 @@ func tick_miner(delta: float) -> void:
 		if miner_cargo_type == "hull":
 			hull_stock += miner_cargo
 			salvage_deliveries += 1
-			if salvage_deliveries == 1:
-				report("First hull feedstock delivered · Wreck excavation underway")
 		else:
-			stock_ore += miner_cargo
-			stock_fe += miner_fe
-			stock_cu += miner_cu
-			stock_si += miner_si
+			deposit_ore(miner_fe, miner_cu, miner_si)
 			deliveries += 1
 			if deliveries == 1:
-				report("First automated delivery · %d ore at the wreck" % miner_cargo)
-			elif deliveries >= 5 and not salvage_insight_ready:
-				salvage_insight_ready = true
-				report("Why is ore collecting here? · Asterion intake identified")
+				report("First automated ore delivery · %d units at the Collection Point" % miner_cargo)
 		miner_cargo = 0
 		miner_fe = 0
 		miner_cu = 0
@@ -643,9 +839,8 @@ func tick_miner(delta: float) -> void:
 	to_field = not to_field
 	miner_leg_number += 1
 	miner_flight_clock = 0.0
-	# Keep working an asteroid until exhausted; then find another surface.
-	if to_field and not salvage_mode and miner_rock >= 0 and rock_remaining(miner_rock) == 0:
-		miner_rock = -1
+	if to_field:
+		assign_miner_task()
 
 func fly_miner_to(target: Vector2, delta: float) -> void:
 	var distance := miner_position.distance_to(target)
@@ -680,15 +875,21 @@ func miner_status() -> String:
 	if link != "CONNECTED":
 		return "Paused · " + link.to_lower()
 	if to_field:
+		if salvage_mode:
+			if miner_hull_site < 0:
+				return "Selecting authorized salvage site"
+			if miner_position.distance_to(SALVAGE_SITES[miner_hull_site]) > 2.5:
+				return "Approaching refinery-access hull"
+			return "Salvaging access plating · %d%%" % mini(99, floori(miner_work_time / HULL_CUT_TIME * 100.0))
 		if miner_rock < 0:
-			return "Searching for accessible material"
+			return "Searching for accessible ore"
 		if miner_position.distance_to(miner_worksite) > 2.5:
 			return "Approaching asteroid %02d surface" % (miner_rock + 1)
 		return "Mining asteroid %02d · %d%%" % [
 			miner_rock + 1, mini(99, floori(miner_work_time / MINER_EXTRACTION_TIME * 100.0))
 		]
 	if miner_position.distance_to(STOCKPILE) > 2.5:
-		return "Returning with %d units" % miner_cargo
+		return "Returning with %d %s units" % [miner_cargo, "hull" if miner_cargo_type == "hull" else "ore"]
 	return "Unloading cargo · %d%%" % mini(99, floori(miner_work_time / MINER_UNLOAD_TIME * 100.0))
 
 func field_cut_fraction() -> float:
@@ -697,10 +898,31 @@ func field_cut_fraction() -> float:
 func hull_cut_fraction() -> float:
 	return clampf(float(hull_extracted) / float(REFINERY_EXPOSURE), 0.0, 1.0)
 
+func extract_hull(site_index: int, requested: int) -> int:
+	if not salvage_insight_unlocked or refinery_exposed or site_index < 0 or site_index >= SALVAGE_SITES.size():
+		return 0
+	var amount := mini(requested, mini(SALVAGE_SITE_QUOTA - hull_site_units[site_index],
+		REFINERY_EXPOSURE - hull_extracted))
+	if amount <= 0:
+		return 0
+	hull_site_units[site_index] += amount
+	hull_extracted += amount
+	if hull_extracted >= REFINERY_EXPOSURE:
+		refinery_exposed = true
+		refinery_phase = RefineryPhase.EXPOSED
+		report("Refinery uncovered · Other hull sectors remain locked")
+	return amount
+
 func hull_site_visual_units(site_index: int) -> float:
 	var progress := float(hull_site_units[site_index])
+	if work_action == "Salvage refinery access plating" and manual_hull_site == site_index:
+		progress += float(mini(3, SALVAGE_SITE_QUOTA - hull_site_units[site_index])) * work_fraction()
+	if phase == Phase.HAULING and salvage_mode and to_field and miner_hull_site == site_index:
+		if miner_position.distance_to(SALVAGE_SITES[site_index]) <= 2.5:
+			progress += float(mini(MINER_LOAD_SIZE, SALVAGE_SITE_QUOTA - hull_site_units[site_index])) * clampf(
+				miner_work_time / HULL_CUT_TIME, 0.0, 1.0)
 	for worker in salvage_workers:
-		if not bool(worker["active"]) or not bool(worker["to_hull"]):
+		if not bool(worker["active"]) or not bool(worker["to_hull"]) or String(worker["task"]) != "hull":
 			continue
 		if int(worker["site_index"]) != site_index:
 			continue
@@ -712,48 +934,71 @@ func hull_site_visual_units(site_index: int) -> float:
 
 func choose_salvage_site(worker: Dictionary) -> bool:
 	var current: int = worker["site_index"]
-	if hull_site_units[current] < SALVAGE_SITE_QUOTA:
-		return true
-	var closest := -1
-	var score := INF
-	var position: Vector2 = worker["position"]
-	for i in range(SALVAGE_SITES.size()):
-		if hull_site_units[i] >= SALVAGE_SITE_QUOTA:
-			continue
-		var distance := position.distance_squared_to(SALVAGE_SITES[i])
-		if distance < score:
-			score = distance
-			closest = i
-	if closest < 0:
+	if current >= 0 and not refinery_exposed and hull_site_units[current] < SALVAGE_SITE_QUOTA:
+		if Vector2(SALVAGE_SITES[current]).distance_to(player) <= COMMS_RANGE:
+			return true
+	var next := closest_open_salvage_site(worker["position"])
+	if next < 0:
 		return false
-	worker["site_index"] = closest
+	worker["site_index"] = next
 	worker["time"] = 0.0
 	return true
 
 func tick_salvage_workers(delta: float) -> void:
+	# These are general-purpose workers. The names 'salvage_workers' and
+	# 'to_hull' survive from Pass 3, but task choice is shared with Miner 031.
 	for i in range(salvage_workers.size()):
-		if not bool(salvage_workers[i]["active"]) or i in refinery_crew:
+		if not bool(salvage_workers[i]["active"]) or i in refinery_crew or i == industry.crew:
 			continue
 		var worker: Dictionary = salvage_workers[i]
 		var current: Vector2 = worker["position"]
-		var to_hull: bool = worker["to_hull"]
+		var outbound: bool = worker["to_hull"]
 		var cargo: int = worker["cargo"]
-		if current.distance_to(player) > COMMS_RANGE * 0.98:
+		if current.distance_to(player) > COMMS_RANGE:
 			worker["linked"] = false
 			move_salvager(worker, player, delta, i)
 			continue
 		if not bool(worker["linked"]):
-			if current.distance_to(player) > COMMS_RANGE * 0.8:
+			if current.distance_to(player) > COMMS_RANGE * 0.80:
 				move_salvager(worker, player, delta, i)
 				continue
 			worker["linked"] = true
-		if to_hull and hull_extracted >= REFINERY_EXPOSURE:
-			continue # Don't damage the newly uncovered refinery.
-		if to_hull and not choose_salvage_site(worker):
-			continue
-		var site_index: int = worker["site_index"]
-		var site: Vector2 = SALVAGE_SITES[site_index]
-		var target := site if to_hull else STOCKPILE
+		if outbound:
+			if String(worker["task"]) == "idle":
+				if not assign_worker_task(worker, 42 + i):
+					worker["velocity"] = Vector2.ZERO
+					continue
+			if String(worker["task"]) == "hull":
+				if not choose_salvage_site(worker):
+					if not assign_worker_task(worker, 42 + i):
+						worker["velocity"] = Vector2.ZERO
+						continue
+			elif String(worker["task"]) == "ore":
+				var rock: int = worker["rock"]
+				if rock < 0 or rock_remaining(rock) <= 0 or Vector2(worker["worksite"]).distance_to(player) > COMMS_RANGE:
+					var next_rock := OreField.nearest_viable_rock(
+						STOCKPILE, player, COMMS_RANGE, asteroid_mined, int(worker["assignments"])
+					)
+					if next_rock < 0:
+						if not assign_worker_task(worker, 42 + i):
+							worker["velocity"] = Vector2.ZERO
+							continue
+					else:
+						worker["rock"] = next_rock
+						worker["worksite"] = OreField.near_surface(next_rock, STOCKPILE)
+						worker["time"] = 0.0
+		var task: String = worker["task"]
+		var target := STOCKPILE
+		if outbound:
+			if task == "hull":
+				var site_index: int = worker["site_index"]
+				if site_index < 0:
+					continue
+				target = SALVAGE_SITES[site_index]
+			elif task == "ore":
+				target = worker["worksite"]
+			else:
+				continue
 		if target.distance_to(player) > COMMS_RANGE:
 			worker["velocity"] = Vector2.ZERO
 			continue
@@ -763,30 +1008,41 @@ func tick_salvage_workers(delta: float) -> void:
 		worker["position"] = target
 		worker["velocity"] = Vector2.ZERO
 		worker["time"] = float(worker["time"]) + delta
-		var duration := HULL_CUT_TIME if to_hull else MINER_UNLOAD_TIME
+		var duration := (HULL_CUT_TIME if task == "hull" else MINER_EXTRACTION_TIME) if outbound else MINER_UNLOAD_TIME
 		if float(worker["time"]) < duration:
 			continue
 		worker["time"] = 0.0
-		if to_hull:
-			var removed := mini(MINER_LOAD_SIZE, mini(REFINERY_EXPOSURE - hull_extracted,
-				SALVAGE_SITE_QUOTA - hull_site_units[site_index]))
+		if outbound:
+			var remaining := SALVAGE_SITE_QUOTA - hull_site_units[int(worker["site_index"])] if task == "hull" else rock_remaining(int(worker["rock"]))
+			if remaining <= 0:
+				continue
+			var removed := mini(MINER_LOAD_SIZE, remaining)
+			if task == "hull":
+				removed = extract_hull(int(worker["site_index"]), removed)
+				worker["cargo_kind"] = "hull"
+			else:
+				var material := extract_rock(int(worker["rock"]), removed)
+				worker["cargo_fe"] = int(material["Fe"])
+				worker["cargo_cu"] = int(material["Cu"])
+				worker["cargo_si"] = int(material["Si"])
+				worker["cargo_kind"] = "ore"
+			worker["cargo"] = removed
 			if removed <= 0:
 				continue
-			hull_extracted += removed
-			hull_site_units[site_index] += removed
-			worker["cargo"] = removed
 			worker["to_hull"] = false
-			if hull_extracted >= REFINERY_EXPOSURE and not refinery_exposed:
-				refinery_exposed = true
-				refinery_phase = RefineryPhase.EXPOSED
-				report("Damaged refinery uncovered · Salvage paused to protect it")
 		else:
-			hull_stock += cargo
-			salvage_deliveries += 1
+			if String(worker["cargo_kind"]) == "hull":
+				hull_stock += cargo
+				salvage_deliveries += 1
+			else:
+				deposit_ore(int(worker["cargo_fe"]), int(worker["cargo_cu"]), int(worker["cargo_si"]))
+				deliveries += 1
 			worker["cargo"] = 0
+			worker["cargo_fe"] = 0
+			worker["cargo_cu"] = 0
+			worker["cargo_si"] = 0
 			worker["to_hull"] = true
-			if salvage_deliveries == 1:
-				report("Asterion hull feedstock delivered to intake cache")
+			assign_worker_task(worker, 42 + i)
 		worker["leg"] = int(worker["leg"]) + 1
 		worker["clock"] = 0.0
 
@@ -804,6 +1060,10 @@ func refinery_placement_error(point: Vector2) -> String:
 		return "Choose open space above the hull"
 	if not is_charted(point):
 		return "Survey the site with HAL first"
+	if point.distance_to(Industry.REACTOR_STAGING) > 560.0:
+		return "Keep the refinery near the Asterion"
+	if Geometry2D.get_closest_point_to_segment(point, Industry.REACTOR_BAY, Industry.REACTOR_STAGING).distance_to(point) < 174.0:
+		return "Keep the adjacent service corridor clear"
 	if point.distance_to(REFINERY_STAGING) < REFINERY_CLEARANCE:
 		return "Clear the recovery staging area"
 	if not refinery_in_range(REFINERY_STAGING) or not refinery_in_range(point):
@@ -850,6 +1110,9 @@ func tick_refinery_recovery(delta: float) -> void:
 			refinery_work_time += delta
 			if refinery_work_time >= REFINERY_ANCHOR_TIME:
 				refinery_phase = RefineryPhase.PLACED
+				industry.start(refinery_position)
+				for index in refinery_crew:
+					assign_worker_task(salvage_workers[index], 42 + index)
 				refinery_crew.clear()
 				report("Refinery anchored · Damaged and offline")
 
@@ -860,10 +1123,10 @@ func tick_refinery_disconnect(delta: float) -> void:
 	# Finish all outstanding bulk deliveries before committing the recovery crew.
 	if refinery_crew.is_empty():
 		for worker in salvage_workers:
-			if int(worker["cargo"]) > 0:
+			if int(worker["cargo"]) > 0 and worker["cargo_kind"] == "hull":
 				return
 		for i in range(salvage_workers.size()):
-			if bool(salvage_workers[i]["active"]):
+			if bool(salvage_workers[i]["active"]) and int(salvage_workers[i]["cargo"]) == 0:
 				refinery_crew.append(i)
 		if refinery_crew.is_empty():
 			return

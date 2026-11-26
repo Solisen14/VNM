@@ -39,7 +39,7 @@ func verify_insight() -> void:
 		"New repairable workers not pinged")
 	game.refresh()
 	assert(game.research_status.text.contains("Salvage unlocked"), "Insight tree didn't advance")
-	assert(game.research.visible and game.insight_tree_nodes.size() == 5, "Insight window did not show the progression")
+	assert(game.research.visible and game.insight_tree_nodes.size() == 6, "Insight window did not show the progression")
 	game.inventory_button.pressed.emit()
 	assert(game.inventory.visible and not game.research.visible, "Cargo button did not switch windows")
 	game.state.ore = 2
@@ -51,6 +51,7 @@ func verify_insight() -> void:
 	escape.pressed = true
 	game._unhandled_key_input(escape)
 	assert(not game.inventory.visible, "Escape did not close cargo")
+	game.state.active_drones = 2
 	game.state.refinery_exposed = true
 	game.state.refinery_phase = State.RefineryPhase.EXPOSED
 	game._physics_process(0.01)
@@ -77,6 +78,28 @@ func verify_insight() -> void:
 	game.left_command(site)
 	assert(not game.placing_refinery and game.state.refinery_phase == State.RefineryPhase.HAULING)
 	assert(not game.state.has_destination, "Placement also issued a flight waypoint")
+	var original := Vector2(100, 100)
+	game.map.camera = original
+	game.map.following = true
+	game.map.pan_from_edge(Vector2(game.map.size.x - 1, game.map.size.y * 0.5), 0.25)
+	assert(not game.map.following and game.map.camera.x > original.x)
+	var panned: Vector2 = game.map.camera
+	game.map.pan_from_edge(game.map.size * 0.5, 0.25)
+	assert(game.map.camera == panned)
+	game.state.industry.start(site)
+	game.state.industry.stage = State.Industry.Stage.REACTOR_CUT
+	game.state.industry.reactor_cuts = 2
+	game.map.sync_matter_visuals(game.state)
+	assert(game.map.reactor_erased > 0 and game.map.reactor_erased < game.map.reactor_cells.size())
+	game.state.industry.stage = State.Industry.Stage.SEARCH
+	game.map.queue_redraw()
+	await process_frame
+	assert(not game.state.is_visible("controller_2"))
+	game.state.industry.stage = State.Industry.Stage.SPECIALIZE
+	game.refresh()
+	assert(game.material_choices.visible and game.material_choices.get_child_count() == 3)
+	game.material_choices.get_child(1).pressed.emit()
+	assert(game.state.industry.refinery.specialization == "Cu" and not game.material_choices.visible)
 	game.restart()
 	assert(not game.research.visible and not game.inventory.visible and not game.active_hud.visible,
 		"Restart left a gameplay overlay open")

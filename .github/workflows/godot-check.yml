@@ -33,7 +33,9 @@ jobs:
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass2_smoke.gd
       - name: Draw the active asteroid workface and gameplay HUD
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass2_map_smoke.gd
-      - name: Verify second Insight, salvage drones and intact material accounting
+      - name: Verify reboot through refinery commissioning and material accounting
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass3_smoke.gd
-      - name: Verify paused Salvage popup and HUD progression
+      - name: Verify Insight windows, camera, HUD and commissioning controls
         run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/pass3_ui_smoke.gd
+      - name: Shared autonomous worker decisions and HAL salvage access
+        run: Godot_v${{ matrix.version }}-stable_linux.x86_64 --headless --path . --script res://tests/autonomous_worker_smoke.gd

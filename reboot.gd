@@ -16,8 +16,8 @@ const PHASE_PROMPTS := [
 	"Calling the Asterion and the mining fleet. Awaiting reply…",
 	"Investigate the three signals. Right-click each contact to approach and scan.",
 	"Gather ore and recover two spare parts. Return to the damaged miner to repair it.",
-	"Miner 031 has rebooted and is selecting a mining worksite.",
-	"Miner 031 works autonomously. Watch its chosen asteroid recede from the surface as it carries ore home."
+	"Miner 031 has rebooted. You can keep extracting ore and deliver it to the Collection Point.",
+	"Miner 031 works autonomously. Right-click the Depleted Ore Field to mine, then right-click the Collection Point to unload."
 ]
 
 var state := State.new()
@@ -39,6 +39,7 @@ var insight_tree_nodes: Array[Label] = []
 var tutorial_briefing := false
 var placing_refinery := false
 var placement_button: Button
+var material_choices: HBoxContainer
 var system_label: Label
 var prompt: Label
 var contact_details: Label
@@ -60,6 +61,7 @@ var follow_button: Button
 var signals_button: Button
 var footer: Label
 var phase_heading: Label
+var industrial_status: Label
 
 func _ready() -> void:
 	get_window().min_size = Vector2i(900, 600)
@@ -108,7 +110,14 @@ func _ready() -> void:
 	phase_heading.add_theme_font_override("font", FONT)
 	objective_docked.add_child(phase_heading)
 	prompt = paragraph(objective_docked, 16, PALE)
+	industrial_status = paragraph(objective_docked, 12, GREEN)
 	placement_button = make_button(objective_docked, "Choose refinery site", toggle_refinery_placement)
+	material_choices = HBoxContainer.new()
+	objective_docked.add_child(material_choices)
+	for material in State.Industry.Refinery.MATERIALS:
+		make_button(material_choices, material, func() -> void:
+			state.industry.select_material(material)
+			refresh())
 	contact_details = paragraph(side, 14, MUTED)
 	work_panel = VBoxContainer.new()
 	side.add_child(work_panel)
@@ -256,7 +265,7 @@ func build_window(view: Control, title: String, width: float, close: Callable, c
 func build_research(view: Control) -> void:
 	var contents := VBoxContainer.new()
 	research = build_window(view, "Insight Tree", 490, toggle_research, contents)
-	for title in ["Field Repair", "Salvage", "Refining & Logistics", "Component Manufacturing", "Drone Construction"]:
+	for title in ["Field Repair", "Salvage", "Refinery Recovery", "Logistics / Hauling", "Component Manufacturing", "Drone Construction"]:
 		if not insight_tree_nodes.is_empty():
 			contents.add_child(make_label("↓", 13, MUTED))
 		var node := make_label(title, 16, PALE)
@@ -272,7 +281,14 @@ func build_inventory(view: Control) -> void:
 	cargo_capacity.show_percentage = false
 	cargo_capacity.custom_minimum_size.y = 7
 	contents.add_child(cargo_capacity)
-	cargo = paragraph(contents, 14, PALE)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size.y = 340
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	contents.add_child(scroll)
+	var inventory_rows := VBoxContainer.new()
+	inventory_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(inventory_rows)
+	cargo = paragraph(inventory_rows, 14, PALE)
 
 func _physics_process(delta: float) -> void:
 	if insight_popup.visible:
@@ -304,10 +320,10 @@ func _physics_process(delta: float) -> void:
 					"Open Insight Tree [I]", false)
 	if state.salvage_insight_ready and not state.salvage_insight_unlocked and not insight_popup.visible:
 		show_briefing("SECOND INSIGHT / SALVAGE", "Why is the ore stockpiling here?",
-			"The intake is still receiving ore. The refinery must be buried under the hull. Three dormant workers are close enough to repair.",
+			"The Collection Point connects to a buried refinery. I can authorize salvage of its access plating. Three dormant workers are close enough to repair.",
 			"Open Insight Tree [I]", false)
-	if state.refinery_phase == State.RefineryPhase.EXPOSED and not insight_popup.visible:
-		show_briefing("THIRD INSIGHT / REFINING & LOGISTICS", "I can recover the refinery.",
+	if state.refinery_phase == State.RefineryPhase.EXPOSED and state.active_drones > 1 and not insight_popup.visible:
+		show_briefing("THIRD INSIGHT / REFINERY RECOVERY", "I can recover the refinery.",
 			"The housing is damaged, but the assembly is intact. The salvagers can release its restraints and tow it clear. Then I’ll choose where to anchor it.",
 			"Queue recovery [I]", false)
 	refresh()
@@ -340,15 +356,25 @@ func accept_designation() -> void:
 func left_command(point: Vector2) -> void:
 	if not (insight_popup.visible or research.visible or inventory.visible) and state.phase >= State.Phase.WAYFINDING:
 		if placing_refinery:
-			if state.place_refinery(point):
+			var industry := state.industry
+			var error := ""
+			match industry.stage:
+				State.Industry.Stage.REACTOR_SITE: error = industry.place_reactor(state, point)
+				State.Industry.Stage.CABLE_ROUTE: error = industry.install_cable(state, point)
+				_:
+					if not state.place_refinery(point):
+						error = state.notice
+			if error.is_empty():
 				placing_refinery = false
+			else:
+				state.report(error)
 			refresh()
 			return
 		state.plot_move(point)
 		map.following = true
 
 func toggle_refinery_placement() -> void:
-	if state.refinery_phase != State.RefineryPhase.STAGED:
+	if state.refinery_phase != State.RefineryPhase.STAGED and state.industry.stage not in [State.Industry.Stage.REACTOR_SITE, State.Industry.Stage.CABLE_ROUTE]:
 		return
 	placing_refinery = not placing_refinery
 	refresh()
@@ -416,21 +442,40 @@ func refresh() -> void:
 			prompt.text = "Collect %d ore  ·  %d / %d\nRecover spare parts  ·  %d / %d" % [
 				State.ORE_REQUIRED, mini(state.ore, State.ORE_REQUIRED), State.ORE_REQUIRED, state.parts, State.PARTS_REQUIRED]
 	if phase == State.Phase.HAULING and not state.salvage_insight_ready:
-		prompt.text = "Watch Miner 031 deliver ore  ·  %d / 5 runs" % state.deliveries
+		prompt.text = "Collect 10 units of ore\nOre collected: %d / %d\nRight-click the field to mine, then the Collection Point to unload." % [
+			state.ore_collected, State.ORE_COLLECTION_GOAL]
 	if state.salvage_insight_ready and not state.salvage_insight_unlocked:
-		prompt.text = "Five deliveries confirmed at the Asterion's former ore intake. A new Insight is available."
+		prompt.text = "Ten ore units at the Collection Point. Why is this old transfer port collecting ore? A new Insight is available."
 	if state.salvage_insight_unlocked:
-		if state.active_drones > 1:
-			prompt.text = "Expose the refinery  ·  %d / %d hull" % [state.hull_extracted, State.REFINERY_EXPOSURE]
-		elif state.repair_kits > 0:
-			prompt.text = "Repair a dormant salvager"
+		if state.repair_kits > 0:
+			prompt.text = "Repair supplies aboard! Right-click a damaged worker to restore it."
+		elif state.active_drones == 1 and (state.ore > 0 or state.hull_cargo > 0):
+			prompt.text = "To repair a worker, first unload HAL's cargo at the Collection Point."
+		elif state.active_drones == 1:
+			prompt.text = "Collect repair supplies at the Collection Point (2 Fe + 1 Cu)."
 		else:
-			prompt.text = "Collect repair supplies at the intake\nRequires 2 Fe + 1 Cu"
-	placement_button.visible = state.refinery_phase == State.RefineryPhase.STAGED
-	placement_button.text = "Cancel preview [Esc]" if placing_refinery else "Choose refinery site"
-	if state.refinery_exposed:
-		phase_heading.text = "REFINING & LOGISTICS"
+			prompt.text = "Expose the refinery  ·  %d / %d hull" % [state.hull_extracted, State.REFINERY_EXPOSURE]
+		if not state.refinery_exposed:
+			prompt.text += "\nRight-click the authorized hull to help salvage."
+	var stage := state.industry.stage
+	placement_button.visible = state.refinery_phase == State.RefineryPhase.STAGED or stage in [State.Industry.Stage.REACTOR_SITE, State.Industry.Stage.CABLE_ROUTE]
+	var placement_label := "Choose refinery site"
+	if stage == State.Industry.Stage.REACTOR_SITE:
+		placement_label = "Choose reactor site"
+	elif stage == State.Industry.Stage.CABLE_ROUTE:
+		placement_label = "Route power cable"
+	placement_button.text = "Cancel preview [Esc]" if placing_refinery else placement_label
+	material_choices.visible = stage == State.Industry.Stage.SPECIALIZE
+	if state.refinery_exposed and (state.active_drones > 1 or state.refinery_phase == State.RefineryPhase.PLACED):
+		phase_heading.text = "REFINERY RECOVERY"
 		prompt.text = refinery_objective()
+	industrial_status.visible = stage != State.Industry.Stage.LOCKED
+	if stage != State.Industry.Stage.LOCKED:
+		industrial_status.text = "REFINERY 01 · " + state.industry.refinery.status()
+		if state.work_action == "Repair refinery":
+			industrial_status.text = "REFINERY 01 · REPAIRING"
+		phase_heading.text = "RESTORE INDUSTRIAL OPERATIONS"
+		prompt.text = industrial_objective()
 	var controls := "Scroll / Q and E to zoom"
 	if phase >= State.Phase.FLIGHT:
 		controls += "   ·   A/D turn   ·   W/S thrust"
@@ -438,6 +483,8 @@ func refresh() -> void:
 		controls += "   ·   Left-click to fly"
 	if phase >= State.Phase.CONTACTS:
 		controls += "   ·   Right-click contacts"
+	if phase >= State.Phase.WAYFINDING:
+		controls += "   ·   Edge-scroll / middle-drag to pan"
 	footer.text = controls
 	contact_details.visible = not selected.is_empty()
 	contact_details.text = ""
@@ -446,14 +493,18 @@ func refresh() -> void:
 		var available := state.command_for(selected)
 		if not available.is_empty():
 			contact_details.text += "\nRight-click · %s" % available
+		else:
+			var guidance := state.interaction_hint(selected)
+			if not guidance.is_empty():
+				contact_details.text += "\n" + guidance
 	work_panel.visible = not state.work_action.is_empty()
 	if work_panel.visible:
 		var progress := state.work_fraction() * 100.0
-		work_caption.text = "%s   %d%%" % [State.WORK_LABELS[state.work_action], mini(99, floori(progress))]
+		work_caption.text = "%s   %d%%" % [State.WORK_LABELS.get(state.work_action, state.work_action), mini(99, floori(progress))]
 		work_progress.value = progress
 	cargo_capacity.value = state.controller_load()
-	cargo.text = "CONTROLLER CARGO   %d / %d\nRaw ore ×%d   ·   Spare parts ×%d\nRepair supplies ×%d" % [
-		state.controller_load(), State.HOLD, state.ore, state.parts, state.repair_kits
+	cargo.text = "CONTROLLER CARGO   %d / %d\nRaw ore ×%d   ·   Hull ×%d\nSpare parts ×%d   ·   Repair supplies ×%d" % [
+		state.controller_load(), State.HOLD, state.ore, state.hull_cargo, state.parts, state.repair_kits
 	]
 	cargo.text += "\nFe %d  ·  Cu %d  ·  Si %d in raw cargo" % [state.cargo_fe, state.cargo_cu, state.cargo_si]
 	if phase >= State.Phase.HAULING:
@@ -461,7 +512,7 @@ func refresh() -> void:
 		cargo.text += "\n\nORE FIELD 01   RAW MATTER\nFe %d  ·  Cu %d  ·  Si %d remaining" % [
 			int(unmined["Fe"]), int(unmined["Cu"]), int(unmined["Si"])
 		]
-		cargo.text += "\n\nASTERION INTAKE CACHE  (%d units)\nFe %d  ·  Cu %d  ·  Si %d\nOre runs %d  ·  Miner cargo %d" % [
+		cargo.text += "\n\nCOLLECTION POINT  (%d raw units)\nFe %d  ·  Cu %d  ·  Si %d\nOre runs %d  ·  Miner cargo %d" % [
 			state.stock_ore, state.stock_fe, state.stock_cu, state.stock_si,
 			state.deliveries, state.miner_cargo
 		]
@@ -469,34 +520,42 @@ func refresh() -> void:
 			state.active_drones, State.DRONE_CAPACITY, int(State.COMMS_RANGE),
 			state.link_status(), state.miner_status()
 		]
+		if stage != State.Industry.Stage.LOCKED:
+			var industry := state.industry
+			cargo.text += "\n\nREFINERY 01   %s\nService modules aboard %d · Conduit aboard %d" % [
+				industry.refinery.status(), industry.service_cargo, industry.conduit_cargo]
+			if industry.reactor_ready:
+				cargo.text += "\nAuxiliary power %d / %d kW available · Starter reserve %d kJ" % [
+					industry.REACTOR_OUTPUT if industry.energy > 0.0 else 0, industry.REACTOR_OUTPUT, ceili(industry.energy)]
 		if state.salvage_insight_unlocked:
 			var restored := 0
 			for worker in state.salvage_workers:
 				if bool(worker["active"]):
 					restored += 1
-			cargo.text += "\n\nASTERION SALVAGE\nWorkers %d / 3  ·  Hull %d / %d\nFeedstock delivered ×%d" % [
+			cargo.text += "\n\nREFINERY ACCESS SECTOR\nRestored workers %d / 3\nHull removed %d / %d  ·  Stored ×%d\nGEN 01  Mining 50%% / Salvage 50%%" % [
 				restored, state.hull_extracted, State.REFINERY_EXPOSURE, state.hull_stock
 			]
 	notice.text = state.notice if state.notice_time > 0 else ""
 	notice.visible = not notice.text.is_empty()
 	insight_tree_nodes[0].text = "Field Repair  ·  %s" % ("Complete" if phase >= State.Phase.HAULING else "Available")
-	insight_tree_nodes[1].text = "Salvage  ·  %s" % ("Unlocked" if state.salvage_insight_unlocked else "Requires 5 miner deliveries")
-	insight_tree_nodes[2].text = "Refining & Logistics  ·  Locked"
+	insight_tree_nodes[1].text = "Salvage  ·  %s" % ("Unlocked" if state.salvage_insight_unlocked else "Requires 10 deposited ore")
+	insight_tree_nodes[2].text = "Refinery Recovery  ·  Locked"
 	if state.refinery_phase == State.RefineryPhase.EXPOSED:
-		insight_tree_nodes[2].text = "Refining & Logistics  ·  Available"
+		insight_tree_nodes[2].text = "Refinery Recovery  ·  Available"
 	elif state.refinery_phase >= State.RefineryPhase.DISCONNECTING:
-		insight_tree_nodes[2].text = "Refining & Logistics  ·  Unlocked"
-	insight_tree_nodes[3].text = "Component Manufacturing  ·  Locked"
-	insight_tree_nodes[4].text = "Drone Construction  ·  Locked"
+		insight_tree_nodes[2].text = "Refinery Recovery  ·  Unlocked"
+	insight_tree_nodes[3].text = "Logistics / Hauling  ·  %s" % ("Unlocked" if state.industry.logistics_unlocked else "Locked")
+	insight_tree_nodes[4].text = "Component Manufacturing  ·  Locked"
+	insight_tree_nodes[5].text = "Drone Construction  ·  Locked"
 	research_status.text = "Ore   %d / %d\nSpare parts   %d / %d\nRepair the damaged miner" % [state.ore, State.ORE_REQUIRED, state.parts, State.PARTS_REQUIRED]
 	if phase >= State.Phase.HAULING:
-		research_status.text = "Field Repair complete · Miner 031 online.\nSalvage threshold: %d / 5 deliveries." % mini(5, state.deliveries)
+		research_status.text = "Field Repair complete · Miner 031 online.\nOre collected: %d / %d." % [mini(State.ORE_COLLECTION_GOAL, state.ore_collected), State.ORE_COLLECTION_GOAL]
 		if state.salvage_insight_unlocked:
 			research_status.text = "Salvage unlocked. Three repairable workers detected.\nRecovered hull material: %d / %d units." % [
 				state.hull_extracted, State.REFINERY_EXPOSURE
 			]
 			if state.refinery_exposed:
-				research_status.text += "\n" + refinery_objective()
+				research_status.text += "\n" + (refinery_objective() if stage == State.Industry.Stage.LOCKED else industrial_objective())
 
 func refinery_objective() -> String:
 	if state.refinery_link_paused:
@@ -518,6 +577,60 @@ func refinery_objective() -> String:
 			return "Anchor the refinery  ·  %d%%" % floori(100.0 * state.refinery_work_time / State.REFINERY_ANCHOR_TIME)
 		State.RefineryPhase.PLACED:
 			return "Refinery placed · Damaged and offline"
+	return ""
+
+func industrial_objective() -> String:
+	var industry := state.industry
+	var stage := industry.stage
+	if industry.paused:
+		return "Work paused · Bring HAL within communications range"
+	match stage:
+		State.Industry.Stage.REPAIR:
+			if state.work_action == "Repair refinery":
+				return "Restore refinery systems · Repairing"
+			if industry.service_delivered < 3:
+				return "Restore refinery systems\nService components delivered: %d / 3\nHAL or workers can recover them from the authorized locker." % industry.service_delivered
+			return "Restore refinery systems\nRight-click Refinery 01 to install the components."
+		State.Industry.Stage.REACTOR_CUT:
+			return "Recover auxiliary reactor\nStrip authorized shielding: %d / %d" % [industry.reactor_cuts, industry.CUT_REQUIRED]
+		State.Industry.Stage.REACTOR_RELEASE, State.Industry.Stage.REACTOR_EXTRACT:
+			return "Recover auxiliary reactor\nThe crew is disconnecting and towing the assembly clear."
+		State.Industry.Stage.REACTOR_SITE:
+			return "Left-click a surveyed site near the refinery." if placing_refinery else "Auxiliary reactor staged · Choose a site near the refinery."
+		State.Industry.Stage.REACTOR_TOW:
+			return "Workers towing the auxiliary reactor to its site."
+		State.Industry.Stage.REACTOR_RESTORE:
+			return "Right-click the reactor to restore it." if industry.service_delivered == 2 else "Restore the auxiliary reactor\nService components delivered: %d / 2" % industry.service_delivered
+		State.Industry.Stage.CONDUIT, State.Industry.Stage.CABLE_ROUTE:
+			if placing_refinery:
+				return "Left-click a surveyed waypoint to route the cable."
+			return "Establish refinery power connection\nConduit delivered: %d / %d\nCable disconnected" % [industry.conduit_stock, industry.CONDUIT_RESERVE]
+		State.Industry.Stage.CABLE_INSTALL:
+			return "Cable connecting  ·  %d%%" % floori(industry.cable_progress * 100.0)
+		State.Industry.Stage.POWER_START:
+			return "Cable connected · Stabilizing auxiliary power"
+		State.Industry.Stage.SEARCH:
+			return "Investigate sensor anomaly\nUnresolved control-frequency signal to the west · %d%%" % industry.signal_strength
+		State.Industry.Stage.CONTROLLER_REPAIR:
+			if not industry.founder_scanned:
+				return "Right-click the resolved craft to scan it."
+			if industry.service_cargo > 0:
+				return "Deliver compatible service modules to Controller 2."
+			if industry.service_delivered == 2:
+				return "Right-click Controller 2 to restore it."
+			return "Recover 2 control modules from the authorized service locker."
+		State.Industry.Stage.CONTROLLER_FLIGHT:
+			return "Controller 2 returning to the refinery\nAwaiting physical docking."
+		State.Industry.Stage.SPECIALIZE:
+			return "Select the refinery's permanent specialization\nIron (Fe), Copper (Cu), or Silicon (Si)"
+		State.Industry.Stage.COMMISSION:
+			if industry.elapsed < 3.0:
+				return "Commissioning · System checks and power stabilization"
+			if industry.elapsed < 6.0:
+				return "Commissioning · Controller handshake"
+			return "Commissioning · Initializing %s processing" % industry.refinery.specialization
+		State.Industry.Stage.ONLINE:
+			return "%s · %s\nLogistics / Hauling Insight unlocked" % [industry.refinery.status(), industry.refinery.specialization]
 	return ""
 
 func refresh_boot() -> void:
