@@ -12,6 +12,8 @@ A Godot 4 prototype about five surviving control drones. The project opens at th
 
 Choose your designation and follow the systems as they come online. Use **Q / E** or the mouse wheel to zoom, **A / D** to turn, and **W / S** for forward and reverse thrust. **Left-click** a waypoint to fly there under autopilot. **Right-click** a contact to approach and carry out its available action. Use **Frame signals** to see the search area again and **Follow controller** to return the camera to your ship.
 
+Tutorial briefings dock as live objectives near the upper-left of the map. Once Field Repair is available, press **I** for the Insight Tree or **C** for the Cargo Inventory. Press **Esc** to close either window.
+
 The controller charts the space along its flight path. Miner 031 can work through the fog and report its cargo without charting terrain.
 
 Scan the ore field, damaged miner and wreck of the MCV Asterion. **Field Repair** appears in a first-Insight pop-up. Press **I** or use the pop-up button to open the Insights panel. Collect 3 ore from the field and one spare part from each of the two wrecked drones, then return to the miner and repair it. **Miner 031 automatically selects a worksite and starts mining as soon as it is repaired.** You do not assign individual ore jobs.
@@ -26,7 +28,7 @@ This update **preserves the existing reboot and Field Repair tutorial**. Only th
 - **Camera:** Scroll or Q/E can now zoom from 0.18× to 8×. A metre scale bar sits in the lower-right of the map. **Frame signals** continues to show the broader tutorial area.
 - **Separate flight lab:** In Godot, open `swarm_lab.tscn` and press **F6** to preview **1, 10, 100 or 1,000** luminous workers moving using exactly the same motion helper (`worker_motion.gd`). This scene tests rendering and steering only; it is not part of the tutorial's production economy and does not chart terrain.
 
-For repeatable headless tests, run `godot --headless --path . --script res://tests/pass1_smoke.gd`, `godot --headless --path . --script res://tests/pass2_smoke.gd`, and `godot --headless --path . --script res://tests/pass3_smoke.gd`. The CI workflow verifies script parsing, scene boot, the rendered mining map, each Insight, conservation and autonomous flight.
+For repeatable headless tests, run `godot --headless --path . --script res://tests/pass1_smoke.gd`, `godot --headless --path . --script res://tests/pass2_smoke.gd`, `godot --headless --path . --script res://tests/pass3_smoke.gd`, and `godot --headless --path . --script res://tests/autonomous_worker_smoke.gd`. The CI workflow verifies script parsing, scene boot, the rendered mining map, each Insight, conservation and autonomous flight.
 
 This is **Pass 1**, not full flocking. Neighbour separation/cohesion, site-specific cutting positions, and large-scale worker aggregation belong to later passes. The player ship still uses its original procedural silhouette at the corrected physical scale; its modular sprite system is planned for Pass 3.
 
@@ -37,24 +39,36 @@ This is **Pass 1**, not full flocking. Neighbour separation/cohesion, site-speci
 - **Mineral accounting:** The initial deposit yields **89 iron (Fe), 34 copper (Cu), 14 silicon (Si)** raw units. Extraction removes these from the field; cargo carries the mixture; the provisional Asterion stockpile stores each raw element separately. These are still raw/unrefined units. The player uses three initial ore samples to repair Miner 031.
 - **Sensor UI:** Hover over a scanned asteroid or zoom in enough for an overlay showing the initial Fe/Cu/Si composition and how much raw matter remains.
 - **Controller constraints:** HAL starts with a hard maximum of **10 supported worker drones** and a **1,450-world-unit communications radius**. Miner 031 cannot operate beyond that radius and heads back toward HAL if contact is lost. The UI shows network status and drone count. **Coordination Cores are NOT available:** their upgrade is reserved for a later Insight.
-- **Next milestone:** After the fifth ore delivery, the *Salvage Insight* pause asks why ore is accumulating at the Asterion's intake. This now leads to three more damaged workers and autonomous hull recovery in Pass 3.
-- **Unchanged:** HAL's flight controls, slow miner acceleration, eight-second extraction time, five-second unloading time, Field Repair, and the tutorial's first pop-up.
+- **Next milestone:** After 10 ore units are deposited by HAL and its workers, the *Salvage Insight* pause asks why ore is accumulating at the Asterion's intake. This now leads to three more damaged workers and autonomous hull recovery in Pass 3.
+- **Worker pacing:** Slow miner acceleration, eight-second extraction time, five-second unloading time, Field Repair, and the tutorial's first pop-up.
 
 **Play note:** When HAL flies far enough away, the miner may stop extraction or follow HAL to restore communications. Returning within the working area allows it to resume. No Coordination Core upgrade is possible in this version.
 
 ## Pass 3: Intake staging, manual mining and salvage discovery
 
-- **HAL can mine again:** After Field Repair, right-click the scanned **Depleted Ore Field** (or a charted asteroid surface) to choose another rock, collect raw ore into HAL's hold, and right-click the intake cache to unload. Extraction uses the same six-second duration; HAL's cargo limit still applies.
+- **HAL can mine again:** After Field Repair, right-click the scanned **Depleted Ore Field** (or a charted asteroid surface) to choose another rock, collect raw ore into HAL's hold, and right-click the **Collection Point** to unload. Extraction uses the same six-second duration; HAL's cargo limit still applies.
 - **Depleted Ore Field:** The first 26-rock deposit retains exactly **137** units: **89 Fe, 34 Cu, 14 Si**, approximately the intended 65/25/10 mixture. These are deliberately irregular resource counts. Sensor bars display percentages and remaining quantities.
-- **Intake cache placement:** The provisional stockpile has moved to a staging pad **above the hull** connected to the Asterion's former refinery intake. Ore flows to this location; it isn't floating over an arbitrary point on the hull.
-- **Second Insight:** Miner 031 makes five deliveries, triggering a pausing Insight: **“Why is the ore stockpiling here?”** Opening it unlocks salvage and reveals three additional dormant salvager signals. They are **not automatically repaired**.
-- **Field repair supplies:** Visit the intake cache to collect a package of **2 Fe + 1 Cu** from its stored raw matter; the package physically occupies three of HAL's five cargo slots. Fly to a disabled salvager and right-click to repair it. Repeat for up to three newly revealed workers. A repaired salvager immediately starts autonomous cutting.
-- **Hull recovery:** Active salvagers travel to separate work sites on the Asterion, cut hull material over 12 seconds, fly the recovered feedstock to the intake cache, and unload over five seconds. After **12 hull units** have been stripped, a damaged refinery is exposed. The salvagers **halt cutting** to protect that component. Relocating and restoring the structure is the next development pass.
-- **Limits and scope:** HAL still supports a maximum of **10 active workers** within its communications radius; no Coordination Core or coordination-capacity upgrade is available yet. The specialized logistics network, relocation of the refinery, permanent stockpile placement, and new drone construction remain future Insights.
+- **Collection Point:** Secured containers above the hull receive raw ore. The fixture’s connection to the Asterion is revealed by the Salvage Insight.
+- **Second Insight:** HAL and the workers deposit 10 ore in total, triggering a pausing Insight: **“Why is the ore stockpiling here?”** Opening it unlocks salvage and reveals three additional dormant salvager signals. They are **not automatically repaired**.
+- **Field repair supplies:** Visit the intake cache to collect a package of **2 Fe + 1 Cu** from its stored raw matter; the package physically occupies three of HAL's five cargo slots. Fly to a disabled salvager and right-click to repair it. Repeat for up to three newly revealed workers. A repaired worker autonomously chooses between mining and the currently authorized salvage work with 50/50 weights.
+- **Hull recovery:** Active salvagers travel to separate work sites on the Asterion, cut hull material over 12 seconds, fly the recovered feedstock to the intake cache, and unload over five seconds. After **12 hull units** have been stripped, a damaged refinery is exposed. The salvagers **halt cutting** to protect that component.
+- **Limits and scope:** HAL still supports a maximum of **10 active workers** within its communications radius; no Coordination Core or coordination-capacity upgrade is available yet. The specialized logistics network, permanent stockpile placement, and new drone construction remain future Insights.
 
-**Test tip:** After the fifth delivery, press **I** on the Salvage Insight pop-up. Collect repair supplies from the intake pad, fly to one of the newly pinged dormant salvagers, repair it, and watch material peel away to expose the refinery. You can also keep mining yourself at any time the hold has space.
+**Test tip:** After Miner 031 is repaired, you can continue to mine the field and drop off material at the Collection Point. At 10 deposited ore, open Salvage, and right-click the highlighted refinery-access hull to help cut it. To restore workers 042–044, unload your cargo at the Collection Point, right-click it again to collect a repair package, then right-click a damaged worker. To move the camera independently, **move the cursor to the edge of the map**, or **middle-drag**; click Follow controller to re-center HAL.
 
-The refinery, general-purpose hauling networks, component manufacturing, and drone replication are not operational in this scene yet. Those belong to subsequent passes.
+## Refinery recovery and placement
+
+After the refinery is exposed, press **I** on the third Insight to queue recovery. Restored salvagers finish their bulk deliveries, disconnect the assembly and tow it out of the Asterion. When it is staged, survey open space above the hull with HAL. Select **Choose refinery site**, then left-click a valid preview to confirm. Press **Esc** to leave placement mode and fly to another survey site.
+
+Keep HAL in communications range while the crew tows and anchors the assembly. Placement starts the **Restore refinery systems** objective.
+
+## Restore industrial operations
+
+Recover three service components from the authorized locker or let a worker deliver them. Right-click the refinery to install them. The recovered auxiliary fusion reactor needs its compartment stripped, the intact assembly towed and placed near the refinery, and two service components installed.
+
+When enough conduit has reached the reactor, use **Route power cable** and choose a surveyed waypoint between the structures. Workers install the route using the reserved conduit. Follow the control-frequency anomaly west to chart the rich deposit and find Controller 2. Scan the craft, recover and deliver two control modules from the service locker, then restore it.
+
+Controller 2 autonomously flies to and docks at the refinery. Choose **Fe**, **Cu**, or **Si** once to specialize the refinery. After commissioning it is **Online / Idle**, and the **Logistics / Hauling** Insight unlocks. The auxiliary reactor has a finite starter reserve. Storage construction, bulk material hauling and refining throughput follow in the next chapter.
 
 ## Earlier Dock 03 mission
 

@@ -1,15 +1,19 @@
 extends "res://dock_map.gd"
 
+const CONTROLLER_SPRITE := preload("res://assets/controller_drone.png")
+const CONTROLLER_2_SPRITE := preload("res://assets/controller_2.png")
 const State = preload("res://reboot_state.gd")
 const OreField = preload("res://ore_field.gd")
+const Industry = State.Industry
 const FOG := Color("#070d10")
-const HULL_BOUNDS := Rect2(380, 45, 2020, 1136)
+const HULL_BOUNDS := State.HULL_BOUNDS
 const SIGNAL_OFFSETS := [Vector2(-32, 30), Vector2(43, 26), Vector2(-52, -28)]
 # A modest editable surface is mapped onto the existing mothership artwork.
 # The holes reveal machinery underneath rather than simulating free-moving atoms.
 const ROCK_IMAGE_EDGE := 48
 const HULL_PEEL_BOUNDS := Rect2(1100, 245, 360, 220)
 const CUT_TILE := 4
+const REACTOR_PEEL_BOUNDS := Rect2(Industry.REACTOR_BAY - Vector2(78, 60), Vector2(156, 120))
 
 var hover := ""
 var rock_images: Array[Image] = []
@@ -21,6 +25,8 @@ var wreck_image: Image
 var wreck_texture: ImageTexture
 var wreck_site_cells: Array = []
 var wreck_site_erased := PackedInt32Array()
+var reactor_cells: Array[Vector2i] = []
+var reactor_erased := 0
 
 func _ready() -> void:
 	clip_contents = true
@@ -36,6 +42,42 @@ func reset_view() -> void:
 	hover = ""
 	build_ore_pixels()
 	build_wreck_pixels()
+
+# Edge-scroll is confined to the actual map viewport, never the sidebar.
+# Moving the cursor to the outer 36 pixels gently disengages HAL follow.
+const EDGE_PAN_MARGIN := 36.0
+const EDGE_PAN_SCREEN_SPEED := 560.0
+
+func pan_from_edge(pointer: Vector2, delta: float) -> void:
+	if size.x < EDGE_PAN_MARGIN * 3.0 or size.y < EDGE_PAN_MARGIN * 3.0:
+		return
+	if pointer.x < 0.0 or pointer.y < 0.0 or pointer.x > size.x or pointer.y > size.y:
+		return
+	var movement := Vector2.ZERO
+	if pointer.x < EDGE_PAN_MARGIN:
+		movement.x = -(EDGE_PAN_MARGIN - pointer.x) / EDGE_PAN_MARGIN
+	elif pointer.x > size.x - EDGE_PAN_MARGIN:
+		movement.x = (pointer.x - (size.x - EDGE_PAN_MARGIN)) / EDGE_PAN_MARGIN
+	if pointer.y < EDGE_PAN_MARGIN:
+		movement.y = -(EDGE_PAN_MARGIN - pointer.y) / EDGE_PAN_MARGIN
+	elif pointer.y > size.y - EDGE_PAN_MARGIN:
+		movement.y = (pointer.y - (size.y - EDGE_PAN_MARGIN)) / EDGE_PAN_MARGIN
+	if movement.length_squared() <= 0.0001:
+		return
+	following = false
+	var magnitude := minf(1.0, movement.length())
+	var displacement := movement.normalized() * (EDGE_PAN_SCREEN_SPEED * magnitude / zoom) * delta
+	camera = (camera + displacement).clamp(State.WORLD.position, State.WORLD.end)
+
+func _process(delta: float) -> void:
+	super._process(delta)
+	if not is_instance_valid(game) or not is_visible_in_tree():
+		return
+	if game.state.phase < State.Phase.WAYFINDING or game.insight_popup.visible or dragging:
+		return
+	if get_viewport().gui_get_hovered_control() != self:
+		return
+	pan_from_edge(get_local_mouse_position(), delta)
 
 func set_zoom(factor: float, anchor: Vector2) -> void:
 	if game.state.phase < State.Phase.SENSORS:
@@ -67,6 +109,9 @@ func _gui_input(event: InputEvent) -> void:
 						var under_cursor := world_point(event.position)
 						if game.state.is_charted(under_cursor) and OreField.within_field(under_cursor):
 							contact = "ore"
+					if contact.is_empty() and game.state.salvage_insight_unlocked:
+						if HULL_PEEL_BOUNDS.has_point(world_point(event.position)):
+							contact = "wreck"
 					if not contact.is_empty():
 						game.right_command(contact)
 		accept_event()
@@ -76,6 +121,9 @@ func _gui_input(event: InputEvent) -> void:
 			var under_cursor := world_point(event.position)
 			if game.state.is_charted(under_cursor) and OreField.within_field(under_cursor):
 				hover = "ore"
+		if hover.is_empty() and game.state.salvage_insight_unlocked:
+			if HULL_PEEL_BOUNDS.has_point(world_point(event.position)):
+				hover = "wreck"
 		if dragging:
 			camera -= event.relative / zoom
 			accept_event()
@@ -98,7 +146,7 @@ func contact_screen_point(contact: String) -> Vector2:
 func at_marker(point: Vector2) -> String:
 	var closest := 38.0
 	var found := ""
-	for contact in State.CONTACTS:
+	for contact in game.state.contacts:
 		if not game.state.is_visible(contact):
 			continue
 		var marker := contact_screen_point(contact)
@@ -119,20 +167,39 @@ func _draw() -> void:
 	draw_chart_background()
 	sync_matter_visuals(state)
 	if hull:
-		draw_buried_refinery(state)
+		draw_refinery_bay(state)
+		if state.industry.stage >= Industry.Stage.REACTOR_CUT:
+			draw_rect(Rect2(screen_point(REACTOR_PEEL_BOUNDS.position), REACTOR_PEEL_BOUNDS.size * zoom), Color("#242b2c"))
+			if state.industry.stage < Industry.Stage.REACTOR_EXTRACT:
+				draw_auxiliary_reactor(Industry.REACTOR_BAY, Color.WHITE, false)
 		var exterior: Texture2D = wreck_texture if wreck_texture != null else hull
 		draw_texture_rect(exterior, Rect2(screen_point(HULL_BOUNDS.position), HULL_BOUNDS.size * zoom), false)
 	draw_ore_field()
-	draw_refinery_intake()
+	draw_industrial_structures(state)
+	draw_collection_fixture(state)
+	if state.refinery_phase >= State.RefineryPhase.EXTRACTING:
+		if state.refinery_phase >= State.RefineryPhase.ANCHORING:
+			draw_refinery_anchors(state)
+		draw_refinery_assembly(state.refinery_position, Color.WHITE)
+		draw_refinery_tow(state)
 	draw_fog(state)
+	if state.refinery_phase >= State.RefineryPhase.EXTRACTING:
+		draw_refinery_marker(state)
+	if game.placing_refinery and not (game.research.visible or game.inventory.visible):
+		if state.industry.stage in [Industry.Stage.REACTOR_SITE, Industry.Stage.CABLE_ROUTE]:
+			draw_industrial_preview(state)
+		else:
+			draw_refinery_preview(state)
+	draw_salvage_access_zone(state)
+	draw_industrial_signals(state)
 	draw_arc(screen_point(state.player), State.SENSOR_RANGE * zoom, 0, TAU, 72, Color("#4b7772"), 1, true)
 
 	if state.has_destination:
 		var end := screen_point(state.destination)
 		draw_dashed_line(screen_point(state.player), end, Color(CYAN, 0.52), 1.2, 7.0)
 		reticle(end, CYAN, 10)
-	if state.phase == State.Phase.HAULING and state.miner_rock >= 0:
-		var source := State.HULL_WORKSITE if state.salvage_mode else state.miner_worksite
+	if state.phase == State.Phase.HAULING and (state.miner_rock >= 0 or state.miner_hull_site >= 0):
+		var source: Vector2 = State.SALVAGE_SITES[state.miner_hull_site] if state.salvage_mode and state.miner_hull_site >= 0 else state.miner_worksite
 		draw_route_hint(screen_point(source), screen_point(State.STOCKPILE))
 	if state.phase >= State.Phase.ORDERS:
 		if state.is_charted(state.miner_position):
@@ -148,11 +215,11 @@ func _draw() -> void:
 				continue
 			var worker_position: Vector2 = worker["position"]
 			if state.is_charted(worker_position):
-				draw_worker_light(worker_position, float(worker["heading"]), true, int(worker["cargo"]) > 0)
+				draw_worker_light(worker_position, float(worker["heading"]), true, int(worker["cargo"]) > 0 or (state.industry.crew == state.salvage_workers.find(worker) and state.industry.job_cargo > 0))
 				if float(worker["time"]) > 0.0:
-					var duration: float = State.HULL_CUT_TIME if bool(worker["to_hull"]) else State.MINER_UNLOAD_TIME
+					var duration: float = (State.HULL_CUT_TIME if String(worker["task"]) == "hull" else State.MINER_EXTRACTION_TIME) if bool(worker["to_hull"]) else State.MINER_UNLOAD_TIME
 					draw_work_arc(screen_point(worker_position), 12.0, float(worker["time"]) / duration)
-	for contact in State.CONTACTS:
+	for contact in game.state.contacts:
 		if state.is_visible(contact):
 			draw_contact(state, contact)
 	draw_controller(state)
@@ -163,21 +230,31 @@ func _draw() -> void:
 		"LOCAL SENSOR RANGE  /  %d%% VIEW" % roundi(zoom * 100), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, CYAN)
 	draw_scale_ruler()
 
-func draw_refinery_intake() -> void:
-	# Explicitly outside the upper hull edge: a provisional intake staging pad.
-	var pad := screen_point(State.STOCKPILE)
-	var mouth := screen_point(State.REFINERY_INTAKE)
-	var radius := maxf(6.0, 18.0 * zoom)
-	draw_line(pad, mouth, Color("#769f91"), maxf(1.0, 2.0 * zoom), true)
-	draw_circle(pad, radius + 4.0 * zoom, Color(0.04, 0.12, 0.14, 0.78), true)
-	draw_circle(pad, radius, Color("#92aea5"), false, maxf(1.0, 1.8 * zoom))
-	draw_line(pad + Vector2(-10, 0) * zoom, pad + Vector2(10, 0) * zoom, Color("#b3d8cb"), 2.0, true)
-	draw_line(pad + Vector2(0, -10) * zoom, pad + Vector2(0, 10) * zoom, Color("#b3d8cb"), 2.0, true)
-	draw_rect(Rect2(mouth - Vector2(22, 11) * zoom, Vector2(44, 22) * zoom), Color("#344d4c"))
-	draw_rect(Rect2(mouth - Vector2(22, 11) * zoom, Vector2(44, 22) * zoom), Color("#a4c1aa"), false, maxf(1.0, zoom))
-	if zoom > 0.65:
-		write(pad + Vector2(-37, -24), "STAGING PAD", Color("#a9c8b9"), 11)
-		write(mouth + Vector2(-30, -17), "INTAKE", Color("#b6c7ad"), 11)
+func draw_collection_fixture(state: State) -> void:
+	var at := screen_point(State.STOCKPILE)
+	var deck := Rect2(at - Vector2(32, 15) * zoom, Vector2(64, 30) * zoom)
+	draw_rect(deck, Color("#303c3b"))
+	draw_rect(deck, Color("#87908a"), false, maxf(1.0, zoom))
+	for x in [-21.0, 0.0, 21.0]:
+		var bin := Rect2(at + Vector2(x - 8.0, -10.0) * zoom, Vector2(16, 20) * zoom)
+		draw_rect(bin, Color("#655f4c"))
+		draw_line(bin.position, Vector2(bin.end.x, bin.position.y), AMBER, maxf(1.0, zoom))
+	if state.salvage_insight_unlocked:
+		draw_line(at, screen_point(State.REFINERY_INTAKE), Color("#769f91"), maxf(1.0, 2.0 * zoom), true)
+
+func draw_salvage_access_zone(state: State) -> void:
+	if not state.salvage_insight_unlocked:
+		return
+	var rect := Rect2(screen_point(HULL_PEEL_BOUNDS.position), HULL_PEEL_BOUNDS.size * zoom)
+	var shade := Color("#6e797a") if state.refinery_exposed else Color("#e4ac6b")
+	draw_rect(rect, Color(shade, 0.08))
+	draw_rect(rect, Color(shade, 0.65), false, maxf(1.0, zoom))
+	for i in range(State.SALVAGE_SITES.size()):
+		if state.hull_site_units[i] >= State.SALVAGE_SITE_QUOTA:
+			continue
+		reticle(screen_point(State.SALVAGE_SITES[i]), shade, maxf(5.0, 7.0 * zoom))
+	var title := "REFINERY EXPOSED / ACCESS CLOSED" if state.refinery_exposed else "AUTHORIZED SALVAGE / REFINERY ACCESS ONLY"
+	write(rect.position + Vector2(4.0, -11.0), title, shade, 12)
 
 func draw_route_hint(from: Vector2, to: Vector2) -> void:
 	# A faint, schematic traffic corridor. Workers themselves steer along
@@ -324,6 +401,17 @@ func build_wreck_pixels() -> void:
 			second += 6.0 * sin(float(b.x) * 0.075 + float(b.y) * 0.11)
 			return first > second
 		)
+	reactor_cells.clear()
+	reactor_erased = 0
+	var texture_extent := Vector2(w, h)
+	var start := Vector2i((REACTOR_PEEL_BOUNDS.position - HULL_BOUNDS.position) * texture_extent / HULL_BOUNDS.size)
+	var finish := Vector2i((REACTOR_PEEL_BOUNDS.end - HULL_BOUNDS.position) * texture_extent / HULL_BOUNDS.size)
+	for y in range(start.y, finish.y, CUT_TILE):
+		for x in range(start.x, finish.x, CUT_TILE):
+			if wreck_image.get_pixel(x, y).a > 0.25:
+				reactor_cells.append(Vector2i(x, y))
+	reactor_cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		return a.y + 8.0 * sin(a.x * 0.16) < b.y + 8.0 * sin(b.x * 0.16))
 	wreck_texture = ImageTexture.create_from_image(wreck_image)
 
 func sync_matter_visuals(state: State) -> void:
@@ -355,16 +443,23 @@ func sync_matter_visuals(state: State) -> void:
 			# Upload only after a worthwhile change, unless a region completes.
 			if target - current < 12 and target != cells.size():
 				continue
-			while current < target:
-				var pixel: Vector2i = cells[current]
-				for py in range(pixel.y, mini(pixel.y + CUT_TILE, wreck_image.get_height())):
-					for px in range(pixel.x, mini(pixel.x + CUT_TILE, wreck_image.get_width())):
-						wreck_image.set_pixel(px, py, Color.TRANSPARENT)
-				current += 1
-			wreck_site_erased[i] = current
+			erase_wreck_tiles(cells, current, target)
+			wreck_site_erased[i] = target
+			any_changed = true
+		var reactor_target := floori(float(reactor_cells.size()) * state.industry.reactor_cuts / Industry.CUT_REQUIRED)
+		if reactor_target > reactor_erased:
+			erase_wreck_tiles(reactor_cells, reactor_erased, reactor_target)
+			reactor_erased = reactor_target
 			any_changed = true
 		if any_changed:
 			wreck_texture.update(wreck_image)
+
+func erase_wreck_tiles(cells: Array, from: int, to: int) -> void:
+	for i in range(from, to):
+		var pixel: Vector2i = cells[i]
+		for py in range(pixel.y, mini(pixel.y + CUT_TILE, wreck_image.get_height())):
+			for px in range(pixel.x, mini(pixel.x + CUT_TILE, wreck_image.get_width())):
+				wreck_image.set_pixel(px, py, Color.TRANSPARENT)
 
 func draw_ore_field() -> void:
 	for index in range(OreField.ROCK_COUNT):
@@ -403,21 +498,156 @@ func draw_field_composition(state: State) -> void:
 		draw_rect(Rect2(p.x + 91.0, y - 4.0, 108.0 * float(remaining) / float(initial), 6.0), pigment)
 		write(Vector2(p.x + 203.0, y + 5.0), "%d" % remaining, Color("#c1ced0"), 11)
 
-func draw_buried_refinery(state: State) -> void:
-	var at := screen_point(State.HULL_WORKSITE + Vector2(36, 20))
-	var unit := zoom
-	var hull_bay := Rect2(at + Vector2(-105, -70) * unit, Vector2(210, 140) * unit)
+func draw_refinery_bay(state: State) -> void:
+	var at := screen_point(State.REFINERY_BAY)
+	var hull_bay := Rect2(at + Vector2(-105, -70) * zoom, Vector2(210, 140) * zoom)
 	draw_rect(hull_bay, Color("#152024"))
-	draw_rect(hull_bay.grow(-8.0 * unit), Color("#2b3637"), false, 2.0)
+	draw_rect(hull_bay.grow(-8.0 * zoom), Color("#354344"), false, 2.0)
+	if state.refinery_phase < State.RefineryPhase.EXTRACTING:
+		draw_refinery_assembly(State.REFINERY_BAY, Color.WHITE)
+
+func draw_refinery_assembly(position: Vector2, tint: Color) -> void:
+	var at := screen_point(position)
+	var extent := State.REFINERY_SIZE * zoom
+	var bounds := Rect2(at - extent * 0.5, extent)
+	draw_rect(bounds, Color("#263538") * tint)
+	draw_rect(bounds, Color("#81948b") * tint, false, maxf(1.0, 3.0 * zoom))
 	for i in range(5):
-		var x := -81.0 + float(i) * 35.0
-		var center := at + Vector2(x, 3) * unit
-		draw_rect(Rect2(center - Vector2(12, 39) * unit, Vector2(24, 78) * unit), Color("#4e6866"))
-		draw_line(center - Vector2(0, 30) * unit, center + Vector2(0, 30) * unit, Color("#a0c1aa"), 2.0)
+		var center := at + Vector2(-70.0 + float(i) * 35.0, 0.0) * zoom
+		draw_rect(Rect2(center - Vector2(12, 39) * zoom, Vector2(24, 78) * zoom), Color("#4e6866") * tint)
+		draw_line(center - Vector2(0, 30) * zoom, center + Vector2(0, 30) * zoom, Color("#a0c1aa") * tint, maxf(1.0, 2.0 * zoom))
 	for y in [-48.0, 49.0]:
-		draw_line(at + Vector2(-92, y) * unit, at + Vector2(93, y) * unit, Color("#996e54"), 5.0 * unit)
-	if state.refinery_exposed:
-		write(at + Vector2(-98, -82) * unit, "DAMAGED REFINERY ASSEMBLY", CYAN, 13)
+		draw_line(at + Vector2(-86, y) * zoom, at + Vector2(86, y) * zoom, Color("#996e54") * tint, maxf(1.0, 5.0 * zoom))
+
+func draw_refinery_tow(state: State) -> void:
+	if state.refinery_phase not in [State.RefineryPhase.EXTRACTING, State.RefineryPhase.HAULING]:
+		return
+	var at := screen_point(state.refinery_position)
+	for i in state.refinery_crew:
+		var worker: Vector2 = state.salvage_workers[i]["position"]
+		draw_line(at.lerp(screen_point(worker), 0.64), screen_point(worker), CYAN, 1.0, true)
+
+func draw_refinery_anchors(state: State) -> void:
+	var deployed := 1.0 if state.refinery_phase == State.RefineryPhase.PLACED else clampf(
+		state.refinery_work_time / State.REFINERY_ANCHOR_TIME, 0.0, 1.0)
+	var at := screen_point(state.refinery_position)
+	for x in [-72.0, 72.0]:
+		for side in [-1.0, 1.0]:
+			var mount := at + Vector2(x, side * State.REFINERY_SIZE.y * 0.5) * zoom
+			var pad := mount + Vector2(0, side * 17.0 * deployed) * zoom
+			draw_line(mount, pad, Color("#84978e"), maxf(1.0, 5.0 * zoom))
+			draw_rect(Rect2(pad - Vector2(9, 4) * zoom, Vector2(18, 8) * zoom), Color("#697c73"))
+
+func draw_refinery_marker(state: State) -> void:
+	var at := screen_point(state.refinery_position)
+	var title := "REFINERY / IN TOW"
+	match state.refinery_phase:
+		State.RefineryPhase.STAGED: title = "REFINERY / STAGED"
+		State.RefineryPhase.ANCHORING: title = "REFINERY / ANCHORING"
+		State.RefineryPhase.PLACED: title = "REFINERY / OFFLINE"
+	write(at + Vector2(-State.REFINERY_SIZE.x * zoom * 0.5, -State.REFINERY_SIZE.y * zoom * 0.5 - 8.0),
+		title, CYAN, 13)
+
+func draw_industrial_structures(state: State) -> void:
+	var industry := state.industry
+	if industry.rich_field_discovered:
+		for i in range(Industry.RICH_ROCKS):
+			var remaining := Industry.RICH_UNITS_PER_ROCK - industry.rich_mined[i]
+			if remaining <= 0:
+				continue
+			var at := screen_point(industry.rich_center(i))
+			var radius := OreField.rock_radius(i) * zoom * sqrt(float(remaining) / Industry.RICH_UNITS_PER_ROCK)
+			var face := PackedVector2Array()
+			for corner in range(8):
+				var angle := TAU * corner / 8.0
+				face.append(at + Vector2.from_angle(angle) * radius * (0.85 + 0.14 * sin(i + corner * 2.8)))
+			draw_colored_polygon(face, Color("#565853"))
+			face.append(face[0])
+			draw_polyline(face, Color("#94918a"), 1.0, true)
+	if industry.stage >= Industry.Stage.REACTOR_EXTRACT:
+		draw_auxiliary_reactor(industry.reactor_position, Color.WHITE, industry.reactor_ready)
+		if industry.stage in [Industry.Stage.REACTOR_EXTRACT, Industry.Stage.REACTOR_TOW] and industry.crew >= 0:
+			var worker: Vector2 = state.salvage_workers[industry.crew]["position"]
+			draw_line(screen_point(industry.reactor_position), screen_point(worker), CYAN, 1.0, true)
+	if industry.cable_route.size() == 3:
+		var color := CYAN if industry.refinery.powered else AMBER
+		var end := industry.cable_point(industry.cable_progress)
+		var first := industry.cable_route[0]
+		var middle := industry.cable_route[1]
+		var first_fraction := first.distance_to(middle) / maxf(0.001, first.distance_to(middle) + middle.distance_to(industry.cable_route[2]))
+		if industry.cable_progress > first_fraction:
+			draw_line(screen_point(first), screen_point(middle), color, maxf(2.0, zoom * 2.0), true)
+			first = middle
+		draw_line(screen_point(first), screen_point(end), color, maxf(2.0, zoom * 2.0), true)
+	if industry.stage >= Industry.Stage.CONTROLLER_REPAIR:
+		var at := screen_point(industry.founder_position)
+		var length := State.CONTROLLER_WORLD_LENGTH * zoom
+		var extent := CONTROLLER_2_SPRITE.get_size() * (length / CONTROLLER_2_SPRITE.get_width())
+		draw_set_transform(at, industry.founder_heading, Vector2.ONE)
+		draw_texture_rect(CONTROLLER_2_SPRITE, Rect2(-extent * 0.5, extent), false)
+		draw_set_transform(Vector2.ZERO)
+
+func draw_auxiliary_reactor(point: Vector2, tint: Color, active: bool) -> void:
+	var at := screen_point(point)
+	var extent := Industry.REACTOR_SIZE * zoom
+	draw_rect(Rect2(at - extent * 0.5, extent), Color("#333b3c") * tint)
+	draw_rect(Rect2(at - extent * 0.5, extent), Color("#938570") * tint, false, maxf(1.0, zoom * 2.0))
+	for x in [-46.0, 46.0]:
+		draw_rect(Rect2(at + Vector2(x - 10, -35) * zoom, Vector2(20, 70) * zoom), Color("#6a6759") * tint)
+	draw_circle(at, 33.0 * zoom, Color("#555b51") * tint, true)
+	draw_circle(at, 26.0 * zoom, (Color("#e5ae66") if active else Color("#82705c")) * tint, false, maxf(2.0, 5.0 * zoom), true)
+	draw_circle(at, 17.0 * zoom, Color("#262f34") * tint, true)
+
+func draw_industrial_signals(state: State) -> void:
+	var industry := state.industry
+	if industry.stage == Industry.Stage.REACTOR_CUT or industry.stage == Industry.Stage.REACTOR_RELEASE:
+		var area := Rect2(screen_point(REACTOR_PEEL_BOUNDS.position), REACTOR_PEEL_BOUNDS.size * zoom)
+		draw_rect(area, AMBER, false, 1.0)
+	if industry.stage == Industry.Stage.SEARCH:
+		var estimate := Industry.SEARCH_CENTER.lerp(Industry.FOUNDER_SITE + Vector2(80, 40), float(industry.signal_strength) / 100.0)
+		var at := screen_point(estimate)
+		var radius := lerpf(295.0, 120.0, float(industry.signal_strength) / 100.0) * zoom
+		draw_arc(at, radius, 0, TAU, 72, Color(AMBER, 0.72), 1.5, true)
+		var label_at := at.clamp(Vector2(24, 35), size - Vector2(230, 35))
+		write(label_at, "APPROXIMATE SIGNAL  %d%%" % industry.signal_strength, AMBER, 12)
+	if industry.refinery.controller_id != 0:
+		var port := screen_point(industry.dock_port())
+		draw_line(port, screen_point(industry.refinery.position + Vector2(-53, 55)), Color("#bdb3ff"), 2.0, true)
+
+func draw_industrial_preview(state: State) -> void:
+	var cursor := get_local_mouse_position()
+	if not Rect2(Vector2.ZERO, size).has_point(cursor):
+		return
+	var point := world_point(cursor)
+	var industry := state.industry
+	var reactor_preview := industry.stage == Industry.Stage.REACTOR_SITE
+	var error := industry.reactor_site_error(state, point) if reactor_preview else industry.cable_error(state, point)
+	var tint := CYAN if error.is_empty() else AMBER
+	if reactor_preview:
+		draw_dashed_line(screen_point(Industry.REACTOR_STAGING), cursor, tint, 1.0, 7.0)
+		draw_auxiliary_reactor(point, Color(tint, 0.65), false)
+	else:
+		draw_dashed_line(screen_point(industry.reactor_position), cursor, tint, 2.0, 7.0)
+		draw_dashed_line(cursor, screen_point(industry.refinery.position), tint, 2.0, 7.0)
+	var caption := error
+	if error.is_empty():
+		caption = "Click to place reactor" if reactor_preview else "Click to install · %d conduit" % industry.route_cost(point)
+	write(cursor.clamp(Vector2(12, 24), size - Vector2(320, 24)) + Vector2(0, -9), caption, tint, 13)
+
+func draw_refinery_preview(state: State) -> void:
+	var cursor := get_local_mouse_position()
+	if not Rect2(Vector2.ZERO, size).has_point(cursor):
+		return
+	var point := world_point(cursor)
+	var error := state.refinery_placement_error(point)
+	var tint := Color("#8cdebb") if error.is_empty() else Color("#f0aa79")
+	draw_dashed_line(screen_point(State.REFINERY_STAGING), cursor, Color(tint, 0.6), 1.0, 6.0)
+	draw_refinery_assembly(point, Color(tint, 0.65))
+	var extent := State.REFINERY_SIZE * zoom
+	draw_rect(Rect2(cursor - extent * 0.5, extent), tint, false, 1.0)
+	var caption := "Click to anchor here" if error.is_empty() else error
+	write(Vector2(clampf(cursor.x, 12.0, maxf(12.0, size.x - 300.0)), maxf(20.0, cursor.y - extent.y * 0.5 - 10.0)),
+		caption, tint, 13)
 
 func draw_contact(state: State, contact: String) -> void:
 	var actual := screen_point(marker_position(contact))
@@ -469,27 +699,15 @@ func draw_worker_light(position: Vector2, angle: float, operating: bool, loaded 
 
 func draw_controller(state: State) -> void:
 	var center := screen_point(state.player)
-	# 25 m of ship across a 5 km mothership, rather than an icon that's 1/40
-	# the hull's length. The reticle and label remain legible when zoomed out.
-	var unit := State.CONTROLLER_WORLD_LENGTH * zoom / 47.0
-	var profile := PackedVector2Array([
-		Vector2(-22, -11), Vector2(0, -11), Vector2(16, -7),
-		Vector2(21, 0), Vector2(16, 7), Vector2(0, 11),
-		Vector2(-22, 11), Vector2(-26, 6), Vector2(-26, -6)
-	])
-	for i in range(profile.size()):
-		profile[i] = center + profile[i].rotated(state.heading) * unit
-	draw_colored_polygon(profile, Color("#727973"))
-	profile.append(profile[0])
-	draw_polyline(profile, Color("#c1c7b3"), 1.0, true)
-	var forward := Vector2.from_angle(state.heading)
-	var side := forward.orthogonal()
-	draw_line(center - forward * 11 * unit, center + forward * 15 * unit,
-		Color("#242d2b"), maxf(1.0, 4.0 * unit), true)
-	for offset in [-6, 6]:
-		var port := center + (-forward * 23.0 + side * float(offset)) * unit
-		draw_circle(port, maxf(0.85, 2.0 * unit),
-			Color(CYAN, 0.42 if state.velocity.length() < 8 else 0.90), true)
-	var marker_radius := maxf(9.0, 27.0 * unit)
+	# The texture faces right. Keep the hull at physical scale and the reticle readable.
+	var hull_length := State.CONTROLLER_WORLD_LENGTH * zoom
+	var sprite_size := CONTROLLER_SPRITE.get_size() * (hull_length / CONTROLLER_SPRITE.get_width())
+	draw_set_transform(center, state.heading, Vector2.ONE)
+	draw_texture_rect(CONTROLLER_SPRITE, Rect2(-sprite_size * 0.5, sprite_size), false)
+	draw_set_transform(Vector2.ZERO)
+	var marker_radius := maxf(9.0, hull_length * 0.57)
 	reticle(center, CYAN, marker_radius)
+	var forward := Vector2.from_angle(state.heading)
+	draw_line(center + forward * (marker_radius + 1.0), center + forward * (marker_radius + 5.0),
+		CYAN, 1.5, true)
 	write(center + Vector2(marker_radius + 6.0, 10.0), state.name_text.to_upper(), CYAN, 13)
