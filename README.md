@@ -12,6 +12,8 @@ A Godot 4 prototype about five surviving control drones. The project opens at th
 
 Choose your designation and follow the systems as they come online. Use **Q / E** or the mouse wheel to zoom, **A / D** to turn, and **W / S** for forward and reverse thrust. **Left-click** a waypoint to fly there under autopilot. **Right-click** a contact to approach and carry out its available action. Use **Frame signals** to see the search area again and **Follow controller** to return the camera to your ship.
 
+Tutorial briefings dock as live objectives near the upper-left of the map. Once Field Repair is available, press **I** for the Insight Tree or **C** for the Cargo Inventory. Press **Esc** to close either window.
+
 The controller charts the space along its flight path. Miner 031 can work through the fog and report its cargo without charting terrain.
 
 Scan the ore field, damaged miner and wreck of the MCV Asterion. **Field Repair** appears in a first-Insight pop-up. Press **I** or use the pop-up button to open the Insights panel. Collect 3 ore from the field and one spare part from each of the two wrecked drones, then return to the miner and repair it. **Miner 031 automatically selects a worksite and starts mining as soon as it is repaired.** You do not assign individual ore jobs.
@@ -49,12 +51,16 @@ This is **Pass 1**, not full flocking. Neighbour separation/cohesion, site-speci
 - **Intake cache placement:** The provisional stockpile has moved to a staging pad **above the hull** connected to the Asterion's former refinery intake. Ore flows to this location; it isn't floating over an arbitrary point on the hull.
 - **Second Insight:** Miner 031 makes five deliveries, triggering a pausing Insight: **“Why is the ore stockpiling here?”** Opening it unlocks salvage and reveals three additional dormant salvager signals. They are **not automatically repaired**.
 - **Field repair supplies:** Visit the intake cache to collect a package of **2 Fe + 1 Cu** from its stored raw matter; the package physically occupies three of HAL's five cargo slots. Fly to a disabled salvager and right-click to repair it. Repeat for up to three newly revealed workers. A repaired salvager immediately starts autonomous cutting.
-- **Hull recovery:** Active salvagers travel to separate work sites on the Asterion, cut hull material over 12 seconds, fly the recovered feedstock to the intake cache, and unload over five seconds. After **12 hull units** have been stripped, a damaged refinery is exposed. The salvagers **halt cutting** to protect that component. Relocating and restoring the structure is the next development pass.
-- **Limits and scope:** HAL still supports a maximum of **10 active workers** within its communications radius; no Coordination Core or coordination-capacity upgrade is available yet. The specialized logistics network, relocation of the refinery, permanent stockpile placement, and new drone construction remain future Insights.
+- **Hull recovery:** Active salvagers travel to separate work sites on the Asterion, cut hull material over 12 seconds, fly the recovered feedstock to the intake cache, and unload over five seconds. After **12 hull units** have been stripped, a damaged refinery is exposed. The salvagers **halt cutting** to protect that component.
+- **Limits and scope:** HAL still supports a maximum of **10 active workers** within its communications radius; no Coordination Core or coordination-capacity upgrade is available yet. The specialized logistics network, permanent stockpile placement, and new drone construction remain future Insights.
 
 **Test tip:** After the fifth delivery, press **I** on the Salvage Insight pop-up. Collect repair supplies from the intake pad, fly to one of the newly pinged dormant salvagers, repair it, and watch material peel away to expose the refinery. You can also keep mining yourself at any time the hold has space.
 
-The refinery, general-purpose hauling networks, component manufacturing, and drone replication are not operational in this scene yet. Those belong to subsequent passes.
+## Refinery recovery and placement
+
+After the refinery is exposed, press **I** on the third Insight to queue recovery. Restored salvagers finish their bulk deliveries, disconnect the assembly and tow it out of the Asterion. When it is staged, survey open space above the hull with HAL. Select **Choose refinery site**, then left-click a valid preview to confirm. Press **Esc** to leave placement mode and fly to another survey site.
+
+Keep HAL in communications range while the crew tows and anchors the assembly. The placed refinery is damaged and offline. Restoration, permanent stockpile placement, and general-purpose hauling follow in later work.
 
 ## Earlier Dock 03 mission
 

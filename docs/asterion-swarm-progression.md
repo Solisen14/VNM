@@ -1,6 +1,6 @@
 # VNM — Asterion salvage, swarm autonomy and industrial progression
 
-Status: **Living design specification. Pass 3 implements recurring HAL manual mining, the irregular depleted field, a second Salvage Insight, three repairable autonomous salvagers, and hull stripping until the refinery is uncovered. Physical structure relocation, refinery operation, coordination upgrades, factories and drone replication remain future work.**
+Status: **Living design specification. Pass 3 implements recurring HAL manual mining, the irregular depleted field, a second Salvage Insight, three repairable autonomous salvagers, and hull stripping until the refinery is uncovered. The playable tutorial extends through intact refinery recovery, towing and player-selected placement. Refinery operation, coordination upgrades, factories and drone replication remain future work.**
 Recorded 2026-11-24. Preserve the current playable tutorial, the measured pace of HAL and Miner 031, and the pixel-disassembly prototype. Do not treat this file as a request to change code.
 
 ## Core fantasy and world scale
@@ -98,7 +98,9 @@ Eventually recover the other **four founding controllers** and outfit them with 
 ## Build priorities and guardrails
 
 - **Pass 2 implemented:** site-specific asteroid selection and local erosion; autonomous first miner; 65/25/10 Fe/Cu/Si field and hover/zoom HUD; a fixed cap of 10 workers and basic communications range, **with no Coordination Cores or early capacity upgrades**. Five deliveries now set the Salvage-ready flag, but do not unlock salvage yet. Approved flight handling and mining pace remain.
-- **Pass 3 implemented:** five ore deliveries open the second Salvage Insight, three newly detectable salvagers can be restored with cache-collected 2 Fe + 1 Cu supplies each, and the workers autonomously remove 12 units of hull feedstock to reveal a damaged refinery. HAL can continue hand-mining and unloading raw samples; the initial deposit is explicitly depleted with irregular resource totals. The provisional intake cache is now next to the upper Asterion hull rather than on the ship.\n- **Next (Pass 4):** recover/disconnect/place the exposed refinery, allow HAL to choose a permanent stockpile location, introduce general-purpose hauling and elemental refining, and ping two additional repairable workers.
+- **Pass 3 implemented:** five ore deliveries open the second Salvage Insight, three newly detectable salvagers can be restored with cache-collected 2 Fe + 1 Cu supplies each, and the workers autonomously remove 12 units of hull feedstock to reveal a damaged refinery. HAL can continue hand-mining and unloading raw samples; the initial deposit is explicitly depleted with irregular resource totals. The provisional intake cache is now next to the upper Asterion hull rather than on the ship.
+- **Refinery placement implemented:** the third Insight queues disconnection and intact recovery. Salvagers stage the assembly above the hull, then tow and anchor it at a surveyed, player-selected site within HAL’s link. The structure remains offline.
+- **Next:** allow HAL to choose a permanent stockpile location, restore the refinery, introduce general-purpose hauling and elemental refining, and ping two additional repairable workers.
 - **Then:** general-purpose hauling, refining, autofactory recovery, part recipes and first newly manufactured worker.
 - Later: true multi-worker swarm behaviour, more structures, and a **separate future Coordination Core Insight** that unlocks capacity upgrades once progression warrants it; planetary-scale resource abstraction and faction evolution.
 - No immediate rewrite to microscopic atom simulation. Keep visual pixels and resource units consistent.

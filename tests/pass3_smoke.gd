@@ -89,5 +89,53 @@ func _initialize() -> void:
 	assert(game.hull_extracted == State.REFINERY_EXPOSURE, "Salvagers damaged exposed machinery")
 	assert(game.active_drones == 4 and game.active_drones < State.DRONE_CAPACITY,
 		"Initial 10-drone limit changed")
-	print("PASS: VNM Pass 3 manual mining, intake cache, Insight, 3 salvage workers and protected refinery")
+	verify_refinery_recovery(game)
+	print("PASS: VNM mining, salvage, intact refinery extraction, tow and placement")
 	quit(0)
+
+func verify_refinery_recovery(game: State) -> void:
+	assert(game.refinery_phase == State.RefineryPhase.EXPOSED)
+	assert(not game.place_refinery(State.REFINERY_STAGING), "Placement skipped disconnection")
+	assert(game.begin_refinery_recovery())
+	assert(not game.begin_refinery_recovery(), "Recovery queued twice")
+	var hull_stock := game.hull_stock
+	var charted_before := game.chart.size()
+	for frame in range(3000):
+		game.tick(1.0 / 30.0, 0.0, 0.0)
+		if game.refinery_phase == State.RefineryPhase.EXTRACTING:
+			break
+	assert(game.refinery_phase == State.RefineryPhase.EXTRACTING, "Crew never reached and disconnected the refinery")
+	assert(game.refinery_position == State.REFINERY_BAY and game.refinery_crew.size() == 3)
+	game.tick(1.0, 0.0, 0.0)
+	assert(game.refinery_position.distance_to(State.REFINERY_BAY) > 0.0
+		and game.refinery_position != State.REFINERY_STAGING, "Refinery extraction skipped visible travel")
+	for frame in range(1000):
+		game.tick(1.0 / 30.0, 0.0, 0.0)
+		if game.refinery_phase == State.RefineryPhase.STAGED:
+			break
+	assert(game.refinery_phase == State.RefineryPhase.STAGED)
+	assert(game.refinery_position == State.REFINERY_STAGING and game.chart.size() == charted_before)
+	assert(not game.place_refinery(State.REFINERY_BAY), "Accepted a site in the hull")
+	var site := State.REFINERY_STAGING + Vector2(230, -135)
+	assert(not game.place_refinery(site), "Accepted an unsurveyed site")
+	game.player = site + Vector2(50, 15)
+	game.chart_position()
+	assert(game.place_refinery(site), game.refinery_placement_error(site))
+	var position := game.refinery_position
+	game.player = State.WORLD.position + Vector2.ONE
+	game.tick(1.0, 0.0, 0.0)
+	assert(game.refinery_link_paused and game.refinery_position == position, "Tow kept moving outside the link")
+	game.player = site + Vector2(50, 15)
+	game.tick(1.0, 0.0, 0.0)
+	assert(not game.refinery_link_paused and game.refinery_position != position and game.refinery_position != site)
+	for frame in range(1000):
+		game.tick(1.0 / 30.0, 0.0, 0.0)
+		if game.refinery_phase == State.RefineryPhase.ANCHORING:
+			break
+	assert(game.refinery_phase == State.RefineryPhase.ANCHORING and game.refinery_position == site)
+	game.tick(State.REFINERY_ANCHOR_TIME * 0.5, 0.0, 0.0)
+	assert(game.refinery_phase == State.RefineryPhase.ANCHORING, "Anchoring completed early")
+	game.tick(State.REFINERY_ANCHOR_TIME * 0.5, 0.0, 0.0)
+	assert(game.refinery_phase == State.RefineryPhase.PLACED and game.refinery_crew.is_empty())
+	assert(game.hull_stock == hull_stock and game.hull_extracted == hull_stock, "Recovery changed bulk feedstock")
+	assert(not game.place_refinery(site + Vector2(200, 0)), "Placed refinery can be placed again")

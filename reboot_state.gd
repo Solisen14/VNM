@@ -4,6 +4,8 @@ const WorkerMotion = preload("res://worker_motion.gd")
 const OreField = preload("res://ore_field.gd")
 
 enum Phase { SAFE_MODE, DIAGNOSTICS, SENSORS, FLIGHT, WAYFINDING, COMMS, CONTACTS, FIELD_REPAIR, ORDERS, HAULING }
+enum RefineryPhase { BURIED, EXPOSED, DISCONNECTING, EXTRACTING, STAGED, HAULING, ANCHORING, PLACED }
+
 const ORE_REQUIRED := 3
 const PARTS_REQUIRED := 2
 const HOLD := 5
@@ -39,6 +41,15 @@ const COMMS_RANGE := 1450.0
 const MINER_LOAD_SIZE := 3
 const HULL_CUT_TIME := 12.0
 const HULL_WORKSITE := Vector2(1275, 340)
+const HULL_BOUNDS := Rect2(380, 45, 2020, 1136)
+const REFINERY_BAY := HULL_WORKSITE + Vector2(36, 20)
+const REFINERY_SIZE := Vector2(190, 116)
+const REFINERY_CLEARANCE := 115.0
+const REFINERY_STAGING := Vector2(REFINERY_BAY.x, -84)
+const REFINERY_DISCONNECT_TIME := 8.0
+const REFINERY_ANCHOR_TIME := 7.0
+const REFINERY_TOW_SPEED := 38.0
+const REFINERY_CREW_OFFSETS := [Vector2(66, -50), Vector2(66, 50), Vector2(-81, 0)]
 const WORK_TIMES := {
 	"Approach and scan": 3.5,
 	"Extract ore sample": 6.0,
@@ -95,6 +106,12 @@ var salvage_deliveries := 0
 var salvage_mode := false
 var miner_cargo_type := "ore"
 var refinery_exposed := false
+var refinery_phase := RefineryPhase.BURIED
+var refinery_position := REFINERY_BAY
+var refinery_destination := REFINERY_STAGING
+var refinery_work_time := 0.0
+var refinery_crew := PackedInt32Array()
+var refinery_link_paused := false
 var zoomed_in := false
 var zoomed_out := false
 var turned := false
@@ -294,6 +311,7 @@ func tick(delta: float, turn: float, thrust: float) -> void:
 		tick_miner(delta)
 		if salvage_insight_unlocked:
 			tick_salvage_workers(delta)
+			tick_refinery_recovery(delta)
 
 func fly(delta: float, turn: float, thrust: float) -> void:
 	if turn != 0.0 or thrust != 0.0:
@@ -714,7 +732,7 @@ func choose_salvage_site(worker: Dictionary) -> bool:
 
 func tick_salvage_workers(delta: float) -> void:
 	for i in range(salvage_workers.size()):
-		if not bool(salvage_workers[i]["active"]):
+		if not bool(salvage_workers[i]["active"]) or i in refinery_crew:
 			continue
 		var worker: Dictionary = salvage_workers[i]
 		var current: Vector2 = worker["position"]
@@ -760,6 +778,7 @@ func tick_salvage_workers(delta: float) -> void:
 			worker["to_hull"] = false
 			if hull_extracted >= REFINERY_EXPOSURE and not refinery_exposed:
 				refinery_exposed = true
+				refinery_phase = RefineryPhase.EXPOSED
 				report("Damaged refinery uncovered · Salvage paused to protect it")
 		else:
 			hull_stock += cargo
@@ -770,6 +789,123 @@ func tick_salvage_workers(delta: float) -> void:
 				report("Asterion hull feedstock delivered to intake cache")
 		worker["leg"] = int(worker["leg"]) + 1
 		worker["clock"] = 0.0
+
+func begin_refinery_recovery() -> bool:
+	if refinery_phase != RefineryPhase.EXPOSED:
+		return false
+	refinery_phase = RefineryPhase.DISCONNECTING
+	report("Recovery queued · Salvagers will finish unloading and assemble at the bay")
+	return true
+
+func refinery_placement_error(point: Vector2) -> String:
+	if not WORLD.grow(-REFINERY_CLEARANCE).has_point(point):
+		return "Choose a site inside the sector"
+	if point.y + REFINERY_CLEARANCE > HULL_BOUNDS.position.y:
+		return "Choose open space above the hull"
+	if not is_charted(point):
+		return "Survey the site with HAL first"
+	if point.distance_to(REFINERY_STAGING) < REFINERY_CLEARANCE:
+		return "Clear the recovery staging area"
+	if not refinery_in_range(REFINERY_STAGING) or not refinery_in_range(point):
+		return "Keep the staging area and site within HAL’s link"
+	# Check the swept footprint of the straight tow, including clearance at the destination.
+	var cache_clearance := REFINERY_CLEARANCE + 35.0
+	var near_cache := Geometry2D.get_closest_point_to_segment(STOCKPILE, REFINERY_STAGING, point)
+	if near_cache.distance_to(STOCKPILE) < cache_clearance:
+		return "Keep the tow clear of the intake cache"
+	for i in range(OreField.ROCK_COUNT):
+		if rock_remaining(i) == 0:
+			continue
+		var center := OreField.rock_center(i)
+		var nearest := Geometry2D.get_closest_point_to_segment(center, REFINERY_STAGING, point)
+		if nearest.distance_to(center) < REFINERY_CLEARANCE + OreField.rock_radius(i):
+			return "Keep the tow clear of the asteroid field"
+	return ""
+
+func place_refinery(point: Vector2) -> bool:
+	if refinery_phase != RefineryPhase.STAGED:
+		return false
+	var error := refinery_placement_error(point)
+	if not error.is_empty():
+		report(error)
+		return false
+	refinery_destination = point
+	refinery_phase = RefineryPhase.HAULING
+	report("Site confirmed · Salvagers towing the refinery")
+	return true
+
+func refinery_in_range(point: Vector2) -> bool:
+	return point.distance_to(player) <= COMMS_RANGE - REFINERY_CLEARANCE
+
+func tick_refinery_recovery(delta: float) -> void:
+	match refinery_phase:
+		RefineryPhase.DISCONNECTING:
+			tick_refinery_disconnect(delta)
+		RefineryPhase.EXTRACTING, RefineryPhase.HAULING:
+			tick_refinery_tow(delta)
+		RefineryPhase.ANCHORING:
+			refinery_link_paused = not refinery_in_range(refinery_position)
+			if refinery_link_paused:
+				return
+			refinery_work_time += delta
+			if refinery_work_time >= REFINERY_ANCHOR_TIME:
+				refinery_phase = RefineryPhase.PLACED
+				refinery_crew.clear()
+				report("Refinery anchored · Damaged and offline")
+
+func tick_refinery_disconnect(delta: float) -> void:
+	refinery_link_paused = not refinery_in_range(REFINERY_BAY)
+	if refinery_link_paused:
+		return
+	# Finish all outstanding bulk deliveries before committing the recovery crew.
+	if refinery_crew.is_empty():
+		for worker in salvage_workers:
+			if int(worker["cargo"]) > 0:
+				return
+		for i in range(salvage_workers.size()):
+			if bool(salvage_workers[i]["active"]):
+				refinery_crew.append(i)
+		if refinery_crew.is_empty():
+			return
+	var ready := true
+	for index in refinery_crew:
+		var worker := salvage_workers[index]
+		var berth: Vector2 = REFINERY_BAY + REFINERY_CREW_OFFSETS[index]
+		var position: Vector2 = worker["position"]
+		if position.distance_to(berth) > 2.5:
+			var target: Vector2 = player if position.distance_to(player) > COMMS_RANGE else berth
+			move_salvager(worker, target, delta, index)
+			ready = false
+		else:
+			worker["position"] = berth
+			worker["velocity"] = Vector2.ZERO
+	if not ready:
+		return
+	refinery_work_time += delta
+	if refinery_work_time >= REFINERY_DISCONNECT_TIME:
+		refinery_phase = RefineryPhase.EXTRACTING
+		refinery_work_time = 0.0
+		report("Restraints released · Towing the assembly out of the hull")
+
+func tick_refinery_tow(delta: float) -> void:
+	refinery_link_paused = not refinery_in_range(refinery_position) or not refinery_in_range(refinery_destination)
+	if refinery_link_paused:
+		return
+	var previous := refinery_position
+	refinery_position = refinery_position.move_toward(refinery_destination, REFINERY_TOW_SPEED * delta)
+	for index in refinery_crew:
+		var worker := salvage_workers[index]
+		worker["position"] = refinery_position + REFINERY_CREW_OFFSETS[index]
+		worker["heading"] = (refinery_position - previous).angle()
+		worker["velocity"] = Vector2.ZERO
+	if refinery_position != refinery_destination:
+		return
+	if refinery_phase == RefineryPhase.EXTRACTING:
+		refinery_phase = RefineryPhase.STAGED
+		report("Refinery clear of the hull · Choose an installation site")
+	else:
+		refinery_phase = RefineryPhase.ANCHORING
+		report("Refinery on site · Anchoring assembly")
 
 func move_salvager(worker: Dictionary, target: Vector2, delta: float, index: int) -> void:
 	var position: Vector2 = worker["position"]

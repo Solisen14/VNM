@@ -1,9 +1,10 @@
 extends "res://dock_map.gd"
 
+const CONTROLLER_SPRITE := preload("res://assets/controller_drone.png")
 const State = preload("res://reboot_state.gd")
 const OreField = preload("res://ore_field.gd")
 const FOG := Color("#070d10")
-const HULL_BOUNDS := Rect2(380, 45, 2020, 1136)
+const HULL_BOUNDS := State.HULL_BOUNDS
 const SIGNAL_OFFSETS := [Vector2(-32, 30), Vector2(43, 26), Vector2(-52, -28)]
 # A modest editable surface is mapped onto the existing mothership artwork.
 # The holes reveal machinery underneath rather than simulating free-moving atoms.
@@ -119,12 +120,21 @@ func _draw() -> void:
 	draw_chart_background()
 	sync_matter_visuals(state)
 	if hull:
-		draw_buried_refinery(state)
+		draw_refinery_bay(state)
 		var exterior: Texture2D = wreck_texture if wreck_texture != null else hull
 		draw_texture_rect(exterior, Rect2(screen_point(HULL_BOUNDS.position), HULL_BOUNDS.size * zoom), false)
 	draw_ore_field()
 	draw_refinery_intake()
+	if state.refinery_phase >= State.RefineryPhase.EXTRACTING:
+		if state.refinery_phase >= State.RefineryPhase.ANCHORING:
+			draw_refinery_anchors(state)
+		draw_refinery_assembly(state.refinery_position, Color.WHITE)
+		draw_refinery_tow(state)
 	draw_fog(state)
+	if state.refinery_phase >= State.RefineryPhase.EXTRACTING:
+		draw_refinery_marker(state)
+	if game.placing_refinery and not (game.research.visible or game.inventory.visible):
+		draw_refinery_preview(state)
 	draw_arc(screen_point(state.player), State.SENSOR_RANGE * zoom, 0, TAU, 72, Color("#4b7772"), 1, true)
 
 	if state.has_destination:
@@ -403,21 +413,70 @@ func draw_field_composition(state: State) -> void:
 		draw_rect(Rect2(p.x + 91.0, y - 4.0, 108.0 * float(remaining) / float(initial), 6.0), pigment)
 		write(Vector2(p.x + 203.0, y + 5.0), "%d" % remaining, Color("#c1ced0"), 11)
 
-func draw_buried_refinery(state: State) -> void:
-	var at := screen_point(State.HULL_WORKSITE + Vector2(36, 20))
-	var unit := zoom
-	var hull_bay := Rect2(at + Vector2(-105, -70) * unit, Vector2(210, 140) * unit)
+func draw_refinery_bay(state: State) -> void:
+	var at := screen_point(State.REFINERY_BAY)
+	var hull_bay := Rect2(at + Vector2(-105, -70) * zoom, Vector2(210, 140) * zoom)
 	draw_rect(hull_bay, Color("#152024"))
-	draw_rect(hull_bay.grow(-8.0 * unit), Color("#2b3637"), false, 2.0)
+	draw_rect(hull_bay.grow(-8.0 * zoom), Color("#354344"), false, 2.0)
+	if state.refinery_phase < State.RefineryPhase.EXTRACTING:
+		draw_refinery_assembly(State.REFINERY_BAY, Color.WHITE)
+
+func draw_refinery_assembly(position: Vector2, tint: Color) -> void:
+	var at := screen_point(position)
+	var extent := State.REFINERY_SIZE * zoom
+	var bounds := Rect2(at - extent * 0.5, extent)
+	draw_rect(bounds, Color("#263538") * tint)
+	draw_rect(bounds, Color("#81948b") * tint, false, maxf(1.0, 3.0 * zoom))
 	for i in range(5):
-		var x := -81.0 + float(i) * 35.0
-		var center := at + Vector2(x, 3) * unit
-		draw_rect(Rect2(center - Vector2(12, 39) * unit, Vector2(24, 78) * unit), Color("#4e6866"))
-		draw_line(center - Vector2(0, 30) * unit, center + Vector2(0, 30) * unit, Color("#a0c1aa"), 2.0)
+		var center := at + Vector2(-70.0 + float(i) * 35.0, 0.0) * zoom
+		draw_rect(Rect2(center - Vector2(12, 39) * zoom, Vector2(24, 78) * zoom), Color("#4e6866") * tint)
+		draw_line(center - Vector2(0, 30) * zoom, center + Vector2(0, 30) * zoom, Color("#a0c1aa") * tint, maxf(1.0, 2.0 * zoom))
 	for y in [-48.0, 49.0]:
-		draw_line(at + Vector2(-92, y) * unit, at + Vector2(93, y) * unit, Color("#996e54"), 5.0 * unit)
-	if state.refinery_exposed:
-		write(at + Vector2(-98, -82) * unit, "DAMAGED REFINERY ASSEMBLY", CYAN, 13)
+		draw_line(at + Vector2(-86, y) * zoom, at + Vector2(86, y) * zoom, Color("#996e54") * tint, maxf(1.0, 5.0 * zoom))
+
+func draw_refinery_tow(state: State) -> void:
+	if state.refinery_phase not in [State.RefineryPhase.EXTRACTING, State.RefineryPhase.HAULING]:
+		return
+	var at := screen_point(state.refinery_position)
+	for i in state.refinery_crew:
+		var worker: Vector2 = state.salvage_workers[i]["position"]
+		draw_line(at.lerp(screen_point(worker), 0.64), screen_point(worker), CYAN, 1.0, true)
+
+func draw_refinery_anchors(state: State) -> void:
+	var deployed := 1.0 if state.refinery_phase == State.RefineryPhase.PLACED else clampf(
+		state.refinery_work_time / State.REFINERY_ANCHOR_TIME, 0.0, 1.0)
+	var at := screen_point(state.refinery_position)
+	for x in [-72.0, 72.0]:
+		for side in [-1.0, 1.0]:
+			var mount := at + Vector2(x, side * State.REFINERY_SIZE.y * 0.5) * zoom
+			var pad := mount + Vector2(0, side * 17.0 * deployed) * zoom
+			draw_line(mount, pad, Color("#84978e"), maxf(1.0, 5.0 * zoom))
+			draw_rect(Rect2(pad - Vector2(9, 4) * zoom, Vector2(18, 8) * zoom), Color("#697c73"))
+
+func draw_refinery_marker(state: State) -> void:
+	var at := screen_point(state.refinery_position)
+	var title := "REFINERY / IN TOW"
+	match state.refinery_phase:
+		State.RefineryPhase.STAGED: title = "REFINERY / STAGED"
+		State.RefineryPhase.ANCHORING: title = "REFINERY / ANCHORING"
+		State.RefineryPhase.PLACED: title = "REFINERY / OFFLINE"
+	write(at + Vector2(-State.REFINERY_SIZE.x * zoom * 0.5, -State.REFINERY_SIZE.y * zoom * 0.5 - 8.0),
+		title, CYAN, 13)
+
+func draw_refinery_preview(state: State) -> void:
+	var cursor := get_local_mouse_position()
+	if not Rect2(Vector2.ZERO, size).has_point(cursor):
+		return
+	var point := world_point(cursor)
+	var error := state.refinery_placement_error(point)
+	var tint := Color("#8cdebb") if error.is_empty() else Color("#f0aa79")
+	draw_dashed_line(screen_point(State.REFINERY_STAGING), cursor, Color(tint, 0.6), 1.0, 6.0)
+	draw_refinery_assembly(point, Color(tint, 0.65))
+	var extent := State.REFINERY_SIZE * zoom
+	draw_rect(Rect2(cursor - extent * 0.5, extent), tint, false, 1.0)
+	var caption := "Click to anchor here" if error.is_empty() else error
+	write(Vector2(clampf(cursor.x, 12.0, maxf(12.0, size.x - 300.0)), maxf(20.0, cursor.y - extent.y * 0.5 - 10.0)),
+		caption, tint, 13)
 
 func draw_contact(state: State, contact: String) -> void:
 	var actual := screen_point(marker_position(contact))
@@ -469,27 +528,15 @@ func draw_worker_light(position: Vector2, angle: float, operating: bool, loaded 
 
 func draw_controller(state: State) -> void:
 	var center := screen_point(state.player)
-	# 25 m of ship across a 5 km mothership, rather than an icon that's 1/40
-	# the hull's length. The reticle and label remain legible when zoomed out.
-	var unit := State.CONTROLLER_WORLD_LENGTH * zoom / 47.0
-	var profile := PackedVector2Array([
-		Vector2(-22, -11), Vector2(0, -11), Vector2(16, -7),
-		Vector2(21, 0), Vector2(16, 7), Vector2(0, 11),
-		Vector2(-22, 11), Vector2(-26, 6), Vector2(-26, -6)
-	])
-	for i in range(profile.size()):
-		profile[i] = center + profile[i].rotated(state.heading) * unit
-	draw_colored_polygon(profile, Color("#727973"))
-	profile.append(profile[0])
-	draw_polyline(profile, Color("#c1c7b3"), 1.0, true)
-	var forward := Vector2.from_angle(state.heading)
-	var side := forward.orthogonal()
-	draw_line(center - forward * 11 * unit, center + forward * 15 * unit,
-		Color("#242d2b"), maxf(1.0, 4.0 * unit), true)
-	for offset in [-6, 6]:
-		var port := center + (-forward * 23.0 + side * float(offset)) * unit
-		draw_circle(port, maxf(0.85, 2.0 * unit),
-			Color(CYAN, 0.42 if state.velocity.length() < 8 else 0.90), true)
-	var marker_radius := maxf(9.0, 27.0 * unit)
+	# The texture faces right. Keep the hull at physical scale and the reticle readable.
+	var hull_length := State.CONTROLLER_WORLD_LENGTH * zoom
+	var sprite_size := CONTROLLER_SPRITE.get_size() * (hull_length / CONTROLLER_SPRITE.get_width())
+	draw_set_transform(center, state.heading, Vector2.ONE)
+	draw_texture_rect(CONTROLLER_SPRITE, Rect2(-sprite_size * 0.5, sprite_size), false)
+	draw_set_transform(Vector2.ZERO)
+	var marker_radius := maxf(9.0, hull_length * 0.57)
 	reticle(center, CYAN, marker_radius)
+	var forward := Vector2.from_angle(state.heading)
+	draw_line(center + forward * (marker_radius + 1.0), center + forward * (marker_radius + 5.0),
+		CYAN, 1.5, true)
 	write(center + Vector2(marker_radius + 6.0, 10.0), state.name_text.to_upper(), CYAN, 13)
