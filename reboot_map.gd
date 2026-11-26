@@ -1,5 +1,6 @@
 extends "res://dock_map.gd"
 
+const CONTROLLER_SPRITE := preload("res://assets/controller_drone.png")
 const State = preload("res://reboot_state.gd")
 const OreField = preload("res://ore_field.gd")
 const FOG := Color("#070d10")
@@ -469,27 +470,15 @@ func draw_worker_light(position: Vector2, angle: float, operating: bool, loaded 
 
 func draw_controller(state: State) -> void:
 	var center := screen_point(state.player)
-	# 25 m of ship across a 5 km mothership, rather than an icon that's 1/40
-	# the hull's length. The reticle and label remain legible when zoomed out.
-	var unit := State.CONTROLLER_WORLD_LENGTH * zoom / 47.0
-	var profile := PackedVector2Array([
-		Vector2(-22, -11), Vector2(0, -11), Vector2(16, -7),
-		Vector2(21, 0), Vector2(16, 7), Vector2(0, 11),
-		Vector2(-22, 11), Vector2(-26, 6), Vector2(-26, -6)
-	])
-	for i in range(profile.size()):
-		profile[i] = center + profile[i].rotated(state.heading) * unit
-	draw_colored_polygon(profile, Color("#727973"))
-	profile.append(profile[0])
-	draw_polyline(profile, Color("#c1c7b3"), 1.0, true)
-	var forward := Vector2.from_angle(state.heading)
-	var side := forward.orthogonal()
-	draw_line(center - forward * 11 * unit, center + forward * 15 * unit,
-		Color("#242d2b"), maxf(1.0, 4.0 * unit), true)
-	for offset in [-6, 6]:
-		var port := center + (-forward * 23.0 + side * float(offset)) * unit
-		draw_circle(port, maxf(0.85, 2.0 * unit),
-			Color(CYAN, 0.42 if state.velocity.length() < 8 else 0.90), true)
-	var marker_radius := maxf(9.0, 27.0 * unit)
+	# The texture faces right. Keep the hull at physical scale and the reticle readable.
+	var hull_length := State.CONTROLLER_WORLD_LENGTH * zoom
+	var sprite_size := CONTROLLER_SPRITE.get_size() * (hull_length / CONTROLLER_SPRITE.get_width())
+	draw_set_transform(center, state.heading, Vector2.ONE)
+	draw_texture_rect(CONTROLLER_SPRITE, Rect2(-sprite_size * 0.5, sprite_size), false)
+	draw_set_transform(Vector2.ZERO)
+	var marker_radius := maxf(9.0, hull_length * 0.57)
 	reticle(center, CYAN, marker_radius)
+	var forward := Vector2.from_angle(state.heading)
+	draw_line(center + forward * (marker_radius + 1.0), center + forward * (marker_radius + 5.0),
+		CYAN, 1.5, true)
 	write(center + Vector2(marker_radius + 6.0, 10.0), state.name_text.to_upper(), CYAN, 13)
